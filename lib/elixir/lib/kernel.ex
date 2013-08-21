@@ -3109,6 +3109,27 @@ defmodule Kernel do
 
       String.graphemes("Hello") |> Enum.reverse
 
+  ## Tips
+  
+  Sometimes you want to put the result of the pipeline in something else than
+  the first argument of the function. The following trick helps with that. Say
+  you have a function `foo` and want the result of the pipeline to flow into
+  it's second argument. 
+
+      y |> foo(x, &1).()
+
+  This gets translated to something equivalent to:
+  
+      (fn z -> foo(x, z) end).(y)
+
+  The same trick can be used when you want to use the result of the pipeline twice:
+
+      y |> foo(&1, &1).()
+
+  In fact it works for every possible unary function value, so if `f` holds an
+  unary function you can use it in a pipeline like this:
+
+      y |> f.()
   """
   defmacro left |> right do
     pipeline_op(left, right)
