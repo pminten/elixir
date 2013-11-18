@@ -15,6 +15,39 @@ defmodule String.Unicode do
       end
   end
 
+  category_major_minor_map = [
+    { "Ll", { :letter, :lowercase } },
+    { "Lu", { :letter, :uppercase } },
+    { "Lt", { :letter, :titlecase } },
+    { "Lm", { :letter, :modifier } },
+    { "Lo", { :letter, :other } },
+    { "Mn", { :mark, :nonspacing } },
+    { "Mc", { :mark, :spacing } },
+    { "Me", { :mark, :enclosing } },
+    { "Nd", { :number, :decimal_digit } },
+    { "Nl", { :number, :letter } },
+    { "No", { :number, :other } },
+    { "Pc", { :punctuation, :connector } },
+    { "Pd", { :punctuation, :dash } },
+    { "Ps", { :punctuation, :open } },
+    { "Pe", { :punctuation, :close } },
+    { "Pi", { :punctuation, :initial_quote } },
+    { "Pf", { :punctuation, :final_quote } },
+    { "Po", { :punctuation, :other } },
+    { "Sm", { :symbol, :math } },
+    { "Sc", { :symbol, :currency } },
+    { "Sk", { :symbol, :modifier } },
+    { "So", { :symbol, :other } },
+    { "Zs", { :separator, :space } },
+    { "Zl", { :separator, :line } },
+    { "Zp", { :separator, :paragraph } },
+    { "Cc", { :other, :control } },
+    { "Cf", { :other, :format } },
+    { "Cs", { :other, :surrogate } },
+    { "Co", { :other, :private_use } },
+    { "Cn", { :other, :not_assigned } },
+  ]
+
   data_path = Path.join(__DIR__, "UnicodeData.txt")
 
   { codes, whitespace, cat_tups } = Enum.reduce File.stream!(data_path), { [], [], [] }, 
@@ -27,7 +60,8 @@ defmodule String.Unicode do
 
     title = :binary.part(title, 0, size(title) - 1)
 
-    ctacc = [{ binary_to_integer(codepoint, 16), binary_to_atom(category) } | ctacc]
+    ctacc = [{ binary_to_integer(codepoint, 16),
+               category_major_minor_map[category] } | ctacc]
 
     cond do
       upper != "" or lower != "" or title != "" ->
@@ -99,6 +133,11 @@ defmodule String.Unicode do
     def category_from_ordinal(unquote(codepoint)), do: unquote(cat)
   end
   def category_from_ordinal(_), do: nil
+  
+  lc { cat_abbr, cat } inlist category_major_minor_map do
+    def category_abbreviation(unquote(cat)), do: unquote(binary_to_atom(cat_abbr))
+  end
+  def category_abbreviation(_), do: nil
 
   # Strip
 
