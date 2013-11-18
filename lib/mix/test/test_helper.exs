@@ -2,10 +2,16 @@ Mix.start()
 Mix.shell(Mix.Shell.Process)
 
 ExUnit.start [trace: "--trace" in System.argv]
-System.put_env("EXUNIT_CONFIG", "none")
 
 defmodule MixTest.Case do
   use ExUnit.CaseTemplate
+
+  defmodule Sample do
+    def project do
+      [ app: :sample,
+        version: "0.1.0" ]
+    end
+  end
 
   using do
     quote do
@@ -17,7 +23,7 @@ defmodule MixTest.Case do
     Mix.env(:dev)
     Mix.Task.clear
     Mix.Shell.Process.flush
-    Mix.Deps.Converger.clear_cache
+    Mix.ProjectStack.clear_cache
     System.put_env("MIX_HOME", tmp_path(".mix"))
     delete_tmp_paths
     :ok
@@ -126,6 +132,19 @@ unless File.dir?(target) do
 
   File.write!(Path.join(target, "mix.exs"), """)
   ## Auto-generated fixture
+  raise "I was not supposed to be loaded"
+  """
+
+  File.cd! target, fn ->
+    System.cmd("git init")
+    System.cmd("git config user.email \"mix@example.com\"")
+    System.cmd("git config user.name \"Mix Repo\"")
+    System.cmd("git add .")
+    System.cmd("git commit -m \"bad\"")
+  end
+
+  File.write!(Path.join(target, "mix.exs"), """)
+  ## Auto-generated fixture
   defmodule GitRepo.Mix do
     use Mix.Project
 
@@ -136,9 +155,6 @@ unless File.dir?(target) do
   """
 
   File.cd! target, fn ->
-    System.cmd("git init")
-    System.cmd("git config user.email \"mix@example.com\"")
-    System.cmd("git config user.name \"Mix Repo\"")
     System.cmd("git add .")
     System.cmd("git commit -m \"ok\"")
   end

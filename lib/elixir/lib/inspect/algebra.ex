@@ -82,6 +82,28 @@ defmodule Inspect.Algebra do
   defrecordp :doc_break, str: " " :: binary
   defrecordp :doc_group, doc: :doc_nil :: t
 
+  defmacrop is_doc(doc) do
+    if __CALLER__.in_guard? do
+      do_is_doc(doc)
+    else
+      var = quote do: doc
+      quote do
+        unquote(var) = unquote(doc)
+        unquote(do_is_doc(var))
+      end
+    end
+  end
+
+  defp do_is_doc(doc) do
+    quote do
+      unquote(doc) |> is_binary or
+      unquote(doc) |> is_integer or
+      unquote(doc) == :doc_nil or
+      (unquote(doc) |> is_tuple and
+       elem(unquote(doc), 0) in [:doc_cons, :doc_nest, :doc_break, :doc_group])
+    end
+  end
+
   @doc """
   Returns `:doc_nil` which is a document entity used to represent
   nothingness. Takes no arguments.
@@ -107,13 +129,17 @@ defmodule Inspect.Algebra do
 
   """
   @spec concat(t, t) :: doc_cons_t
-  def concat(x, y), do: doc_cons(left: x, right: y)
+  def concat(x, y) when is_doc(x) and is_doc(y) do
+    doc_cons(left: x, right: y)
+  end
 
   @doc """
   Concatenates a list of documents.
   """
   @spec concat([t]) :: doc_cons_t
-  def concat(docs), do: folddoc(docs, &concat(&1, &2))
+  def concat(docs) do
+    folddoc(docs, &concat(&1, &2))
+  end
 
   @doc """
   Nests document entity `x` positions deep. Nesting will be
@@ -127,8 +153,13 @@ defmodule Inspect.Algebra do
 
   """
   @spec nest(t, non_neg_integer) :: doc_nest_t
-  def nest(x, 0),                    do: x
-  def nest(x, i) when is_integer(i), do: doc_nest(indent: i, doc: x)
+  def nest(x, 0) when is_doc(x) do
+    x
+  end
+
+  def nest(x, i) when is_doc(x) and is_integer(i) do
+    doc_nest(indent: i, doc: x)
+  end
 
   @doc %S"""
   Document entity representing a break. This break can
@@ -198,7 +229,9 @@ defmodule Inspect.Algebra do
 
   """
   @spec group(t) :: doc_group_t
-  def group(d), do: doc_group(doc: d)
+  def group(d) when is_doc(d) do
+    doc_group(doc: d)
+  end
 
   @doc """
   Inserts a mandatory single space between two document entities.
@@ -240,7 +273,7 @@ defmodule Inspect.Algebra do
       "A!B"
 
   """
-  @spec folddoc([any], ((any, [t]) -> t)) :: t
+  @spec folddoc([t], ((t, t) -> t)) :: t
   def folddoc([], _), do: empty
   def folddoc([doc], _), do: doc
   def folddoc([d|ds], f), do: f.(d, folddoc(ds, f))
@@ -281,32 +314,38 @@ defmodule Inspect.Algebra do
       iex> Inspect.Algebra.pretty(doc, 20)
       "[1, 2, 3, ...]"
 
+      iex> doc = Inspect.Algebra.surround_many("[", Enum.to_list(1..5), "]", 3, &integer_to_binary(&1), "!")
+      iex> Inspect.Algebra.pretty(doc, 20)
+      "[1! 2! 3! ...]"
+
   """
-  @spec surround_many(binary, [any], binary, integer | :infinity, (term -> t)) :: t
-  def surround_many(left, [], right, _, _fun) do
+  @spec surround_many(binary, [any], binary, integer | :infinity, (term -> t), binary) :: t
+  def surround_many(left, docs, right, limit, fun, separator // @surround_separator)
+
+  def surround_many(left, [], right, _, _fun, _) do
     concat(left, right)
   end
 
-  def surround_many(left, docs, right, limit, fun) do
-    surround(left, surround_many(docs, limit, fun), right)
+  def surround_many(left, docs, right, limit, fun, sep) do
+    surround(left, surround_many(docs, limit, fun, sep), right)
   end
 
-  defp surround_many(_, 0, _fun) do
+  defp surround_many(_, 0, _fun, _sep) do
     "..."
   end
 
-  defp surround_many([h], _limit, fun) do
+  defp surround_many([h], _limit, fun, _sep) do
     fun.(h)
   end
 
-  defp surround_many([h|t], limit, fun) when is_list(t) do
+  defp surround_many([h|t], limit, fun, sep) when is_list(t) do
     glue(
-      concat(fun.(h), @surround_separator),
-      surround_many(t, decrement(limit), fun)
+      concat(fun.(h), sep),
+      surround_many(t, decrement(limit), fun, sep)
     )
   end
 
-  defp surround_many([h|t], _limit, fun) do
+  defp surround_many([h|t], _limit, fun, _sep) do
     glue(
       concat(fun.(h), @tail_separator),
       fun.(t)
@@ -357,7 +396,7 @@ defmodule Inspect.Algebra do
   def fits?(w, [{i, _, doc_group(doc: x)} | t]),            do: fits?(w, [{i, :flat, x} | t])
 
   @doc false
-  @spec format(integer, integer, [{ integer, mode, t }]) :: atom | tuple
+  @spec format(integer | :infinity, integer, [{ integer, mode, t }]) :: atom | tuple
   def format(_, _, []),                                        do: :s_nil
   def format(w, k, [{_, _, :doc_nil} | t]),                    do: format(w, k, t)
   def format(w, k, [{i, m, doc_cons(left: x, right: y)} | t]), do: format(w, k, [{i, m, x} | [{i, m, y} | t]])
@@ -367,7 +406,8 @@ defmodule Inspect.Algebra do
   def format(w, k, [{_, :flat, doc_break(str: s)} | t]),       do: s_text(str: s, sdoc: format(w, (k + byte_size s), t))
   def format(w, k, [{i, :break, doc_break(str: s)} | t]) do
     k = k + byte_size(s)
-    if fits?(w - k, t) do
+
+    if w == :infinity or fits?(w - k, t) do
       s_text(str: s, sdoc: format(w, k, t))
     else
       s_line(indent: i, sdoc: format(w, i, t))

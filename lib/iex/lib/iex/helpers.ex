@@ -11,24 +11,25 @@ defmodule IEx.Helpers do
 
   There are many other helpers available:
 
-  * `c/2`     — compiles a file at the given path
-  * `cd/1`    — changes the current directory
-  * `clear/0` — clears the screen
-  * `flush/0` — flushes all messages sent to the shell
-  * `h/0`     — prints this help message
-  * `h/1`     — prints help for the given module, function or macro
-  * `l/1`     — loads the given module's beam code and purges the current version
-  * `ls/0`    — lists the contents of the current directory
-  * `ls/1`    — lists the contents of the specified directory
-  * `m/0`     — prints loaded modules
-  * `pwd/0`   — prints the current working directory
-  * `r/1`     — recompiles and reloads the given module's source file
-  * `s/1`     — prints spec information
-  * `t/1`     — prints type information
-  * `v/0`     — prints the history of commands evaluated in the session
-  * `v/1`     — retrieves the nth value from the history
+  * `c/2`       — compiles a file at the given path
+  * `cd/1`      — changes the current directory
+  * `clear/0`   — clears the screen
+  * `flush/0`   — flushes all messages sent to the shell
+  * `h/0`       — prints this help message
+  * `h/1`       — prints help for the given module, function or macro
+  * `l/1`       — loads the given module's beam code and purges the current version
+  * `ls/0`      — lists the contents of the current directory
+  * `ls/1`      — lists the contents of the specified directory
+  * `m/0`       — prints loaded modules
+  * `pwd/0`     — prints the current working directory
+  * `r/1`       — recompiles and reloads the given module's source file
+  * `respawn/0` — respawns the current shell
+  * `s/1`       — prints spec information
+  * `t/1`       — prints type information
+  * `v/0`       — prints the history of commands evaluated in the session
+  * `v/1`       — retrieves the nth value from the history
   * `import_file/1`
-              — evaluates the given file in the shell's context
+                — evaluates the given file in the shell's context
 
   Help for functions in this module can be consulted
   directly from the command line, as an example, try:
@@ -61,8 +62,23 @@ defmodule IEx.Helpers do
       c "baz.ex"
       #=> [Baz]
   """
-  def c(files, path // ".") do
-    { erls, exs } = Enum.partition(List.wrap(files), &String.ends_with?(&1, ".erl"))
+  def c(files, path // ".") when is_binary(path) do
+    files = List.wrap(files)
+
+    unless Enum.all?(files, &is_binary/1) do
+      raise ArgumentError, message: "expected a binary or a list of binaries as argument"
+    end
+
+    { found, not_found } = Enum.map(files, &Path.join(path, &1)) |> Enum.partition(&File.exists?/1)
+
+    unless Enum.empty?(not_found) do
+      IO.puts IEx.color(:eval_error, %s[Cannot find #{Enum.join(not_found, ", ")}])
+      unless Enum.empty?(found) do
+        IO.puts IEx.color(:eval_info, "(remaining file(s) will be compiled)")
+      end
+    end
+
+    { erls, exs } = Enum.partition(found, &String.ends_with?(&1, ".erl"))
 
     modules = Enum.map(erls, fn(source) ->
       { module, binary } = compile_erlang(source)
@@ -77,13 +93,13 @@ defmodule IEx.Helpers do
   Clear the console screen.
   """
   def clear do
-    IO.write [ IO.ANSI.home, IO.ANSI.clear ]
+    IO.write [IO.ANSI.home, IO.ANSI.clear]
     dont_display_result
   end
 
   @doc """
-  Prints the list of all loaded modules with paths to their corresponding .beam
-  files.
+  Prints the list of all loaded modules with paths to
+  their corresponding `.beam` files.
   """
   def m do
     all    = Enum.map :code.all_loaded, fn { mod, file } -> { inspect(mod), file } end
@@ -262,9 +278,9 @@ defmodule IEx.Helpers do
     IEx.History.each(&print_history_entry(&1, inspect_opts))
   end
 
-  defp print_history_entry(config, inspect_opts) do
-    IO.write IEx.color(:info, "#{config.counter}: #{config.cache}#=> ")
-    IO.puts  IEx.color(:eval_result, "#{inspect config.result, inspect_opts}\n")
+  defp print_history_entry({ counter, cache, result }, inspect_opts) do
+    IO.write IEx.color(:eval_info, "#{counter}: #{cache}#=> ")
+    IO.puts  IEx.color(:eval_result, "#{inspect result, inspect_opts}\n")
   end
 
   @doc """
@@ -274,7 +290,7 @@ defmodule IEx.Helpers do
   For instance, v(-1) returns the result of the last evaluated expression.
   """
   def v(n) do
-    IEx.History.nth(n).result
+    IEx.History.nth(n) |> elem(2)
   end
 
   @doc """
@@ -283,7 +299,7 @@ defmodule IEx.Helpers do
   Please note that all the modules defined in the same file as `module`
   are recompiled and reloaded.
   """
-  def r(module) do
+  def r(module) when is_atom(module) do
     case do_r(module) do
       mods when is_list(mods) -> { module, mods }
       other -> other
@@ -308,7 +324,7 @@ defmodule IEx.Helpers do
   Load the given module's beam code (and ensures any previous
   old version was properly purged before).
   """
-  def l(module) do
+  def l(module) when is_atom(module) do
     :code.purge(module)
     :code.load_file(module)
   end
@@ -344,17 +360,17 @@ defmodule IEx.Helpers do
   Prints the current working directory.
   """
   def pwd do
-    IO.puts IEx.color(:info, System.cwd!)
+    IO.puts IEx.color(:eval_info, System.cwd!)
   end
 
   @doc """
   Changes the current working directory to the given path.
   """
-  def cd(directory) do
+  def cd(directory) when is_binary(directory) do
     case File.cd(expand_home(directory)) do
       :ok -> pwd
       { :error, :enoent } ->
-        IO.puts IEx.color(:error, "No directory #{directory}")
+        IO.puts IEx.color(:eval_error, "No directory #{directory}")
     end
   end
 
@@ -362,7 +378,7 @@ defmodule IEx.Helpers do
   Produces a simple list of a directory's contents.
   If `path` points to a file, prints its full path.
   """
-  def ls(path // ".") do
+  def ls(path // ".") when is_binary(path) do
     path = expand_home(path)
     case File.ls(path) do
       { :ok, items } ->
@@ -370,10 +386,10 @@ defmodule IEx.Helpers do
         ls_print(path, sorted_items)
 
       { :error, :enoent } ->
-        IO.puts IEx.color(:error, "No such file or directory #{path}")
+        IO.puts IEx.color(:eval_error, "No such file or directory #{path}")
 
       { :error, :enotdir } ->
-        IO.puts IEx.color(:info, Path.absname(path))
+        IO.puts IEx.color(:eval_info, Path.absname(path))
     end
   end
 
@@ -414,11 +430,24 @@ defmodule IEx.Helpers do
   defp format_item(path, representation) do
     case File.stat(path) do
       { :ok, File.Stat[type: :device] } ->
-        IEx.color(:device, representation)
+        IEx.color(:ls_device, representation)
       { :ok, File.Stat[type: :directory] } ->
-        IEx.color(:directory, representation)
+        IEx.color(:ls_directory, representation)
       _ ->
         representation
+    end
+  end
+
+  @doc """
+  Respawns the current shell by starting a new
+  process and a new scope. Returns true if it worked.
+  """
+  def respawn do
+    if whereis = IEx.Server.whereis do
+      whereis <- { :respawn, self }
+      true
+    else
+      false
     end
   end
 

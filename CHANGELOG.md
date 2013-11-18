@@ -1,19 +1,123 @@
-# v0.10.3-dev
+# v0.11.3-dev
 
 * Enhancements
-  * [Enum] Add `Enum.take_every/2`
-  * [Kernel] Allow documentation for types with `@typedoc`
 
 * Bug fixes
-  * [IEx] Fix regression when using `:error_messages` with IEx
-  * [Kernel] Fixed handling of multiple heredocs on the same line
-  * [Regex] Fix bug on `Regex.scan/3` when capturing groups and the regex has no groups
 
 * Deprecations
 
 * Backwards incompatible changes
+  * [Kernel] Behaviour of `Enum.drop/2` and `Enum.take/2` has been switched when given negative counts
+
+
+# v0.11.2 (2013-11-14)
+
+* Enhancements
+  * [Mix] Add `mix iex` that redirects users to the proper `iex -S mix` command
+  * [Mix] Support `build_per_environment: true` in project configuration that manages a separete build per environment, useful when you have per-environment behaviour/compilation
+
+* Backwards incompatible changes
+  * [Mix] Mix now compiles files to `_build`. Projects should update just fine, however documentation and books may want to update to the latest information
+
+# v0.11.1 (2013-11-07)
+
+* Enhancements
+  * [Mix] Improve dependency convergence by explicitly checking each requirement instead of expecting all requirements to be equal
+  * [Mix] Support optional dependencies with `optional: true`. Optional dependencies are downloaded for the current project but they are automatically skipped when such project is used as a dependency
+
+* Bug fixes
+  * [Kernel] Set compilation status per ParallelCompiler and not globally
+  * [Mix] Ensure Mix does not load previous dependencies versions before `deps.get`/`deps.update`
+  * [Mix] Ensure umbrella apps are sorted before running recursive commands
+  * [Mix] Ensure umbrella apps run in the same environment as the parent project
+  * [Mix] Ensure dependency tree is topsorted before compiling
+  * [Mix] Raise error when duplicated projects are pushed into the stack
+  * [URI] Allow lowercase escapes in URI
+
+* Backwards incompatible changes
+  * [Mix] Setting `:load_paths` in your project configuration is deprecated
+
+# v0.11.0 (2013-11-02)
+
+* Enhancements
+  * [Code] Eval now returns variables from other contexts
+  * [Dict] Document and enforce all dicts use the match operator (`===`) when checking for keys
+  * [Enum] Add `Enum.slice/2` with a range
+  * [Enum] Document and enforce `Enum.member?/2` to use the match operator (`===`)
+  * [IEx] Split `IEx.Evaluator` from `IEx.Server` to allow custom evaluators
+  * [IEx] Add support for `IEx.pry` which halts a given process for inspection
+  * [IO] Add specs and allow some IO APIs to receive any data that implements `String.Chars`
+  * [Kernel] Improve stacktraces on command line interfaces
+  * [Kernel] Sigils can now handle balanced tokens as in `%s(f(o)o)`
+  * [Kernel] Emit warnings when an alias is not used
+  * [Macro] Add `Macro.pipe/3` and `Macro.unpipe/1` for building pipelines
+  * [Mix] Allow umbrella children to share dependencies between them
+  * [Mix] Allow mix to be escriptize'd
+  * [Mix] Speed mix projects compilation by relying on more manifests information
+  * [Protocol] Protocols now provide `impl_for/1` and `impl_for!/1` functions which receive a structure and returns its respective implementation, otherwise returns nil or an error
+  * [Set] Document and enforce all sets use the match operator (`===`) when checking for keys
+  * [String] Update to Unicode 6.3.0
+  * [String] Add `String.slice/2` with a range
+
+* Bug fixes
+  * [Exception] Ensure `defexception` fields can be set dynamically
+  * [Kernel] Guarantee aliases hygiene is respected when the current module name is not known upfront
+  * [Kernel] `Kernel.access/2` no longer flattens lists
+  * [Mix] Ensure cyclic dependencies are properly handled
+  * [String] Implement the extended grapheme cluster algorithm for `String` operations
+
+* Deprecations
+  * [Kernel] `pid_to_list/1`, `list_to_pid/1`, `binary_to_atom/2`, `binary_to_existing_atom/2` and `atom_to_binary/2` are deprecated in favor of their counterparts in the `:erlang` module
+  * [Kernel] `insert_elem/3` and `delete_elem/2` are deprecated in favor of `Tuple.insert_at/3` and `Tuple.delete_at/2`
+  * [Kernel] Use of `in` inside matches (as in `x in [1,2,3] -> x`) is deprecated in favor of the guard syntax (`x when x in [1,2,3]`)
+  * [Macro] `Macro.expand_all/2` is deprecated
+  * [Protocol] `@only` and `@except` in protocols are now deprecated
+  * [Protocol] Protocols no longer fallback to `Any` out of the box (this functionality needs to be explicitly enabled by setting `@fallback_to_any` to true)
+  * [String] `String.to_integer/1` and `String.to_float/1` are deprecated in favor of `Integer.parse/1` and `Float.parse/1`
+
+* Backwards incompatible changes
+  * [CLI] Reading `.elixirrc` has been dropped in favor of setting env vars
+  * [Kernel] `Kernel.access/2` now expects the second argument to be a compile time list
+  * [Kernel] `fn -> end` quoted expression is no longer wrapped in a `do` keyword
+  * [Kernel] Quoted variables from the same module must be explicitly shared. Previously, if a function returned `quote do: a = 1`, another function from the same module could access it as `quote do: a`. This has been fixed and the variables must be explicitly shared with `var!(a, __MODULE__)`
+  * [Mix] Umbrella apps now treat children apps as dependencies. This means all dependencies will be checked out in the umbrela `deps` directory. On upgrade, child apps need to point to the umbrella project by setting `deps_path: "../../deps_path", lockfile: "../../mix.lock"` in their project config
+  * [Process] `Process.group_leader/2` args have been reversed so the "subject" comes first
+  * [Protocol] Protocol no longer dispatches to `Number`, but to `Integer` and `Float`
+
+# v0.10.3 (2013-10-02)
+
+* Enhancements
+  * [Enum] Add `Enum.take_every/2`
+  * [IEx] IEx now respects signals sent from the Ctrl+G menu
+  * [Kernel] Allow documentation for types with `@typedoc`
+  * [Mix] Allow apps to be selected in umbrella projects
+  * [Record] Generated record functions `new` and `update` also take options with strings as keys
+  * [Stream] Add `Stream.unfold/1`
+
+* Bug fixes
+  * [Dict] Fix a bug when a HashDict was marked as equal when one was actually a subset of the other
+  * [EEx] Solve issue where `do` blocks inside templates were not properly aligned
+  * [ExUnit] Improve checks and have better error reports on poorly aligned doctests
+  * [Kernel] Fix handling of multiple heredocs on the same line
+  * [Kernel] Provide better error messages for match, guard and quoting errors
+  * [Kernel] Make `Kernel.raise/2` a macro to avoid messing up stacktraces
+  * [Kernel] Ensure `&()` works on quoted blocks with only one expression
+  * [Mix] Address an issue where a dependency was not compiled in the proper order when specified in different projects
+  * [Mix] Ensure `compile: false` is a valid mechanism for disabling the compilation of dependencies
+  * [Regex] Fix bug on `Regex.scan/3` when capturing groups and the regex has no groups
+  * [String] Fix a bug with `String.split/2` when given an empty pattern
+  * [Typespec] Guarantee typespecs error reports point to the proper line
+
+* Deprecations
+  * [Kernel] The previous partial application syntax (without the `&` operator) has now been deprecated
+  * [Regex] `Regex.captures/3` is deprecated in favor of `Regex.named_captures/3`
+  * [String] `String.valid_codepoint?/1` is deprecated in favor of pattern matching with `<<_ :: utf8 >>`
+
+* Backwards incompatible changes
+  * [IEx] The `r/0` helper has been removed as it caused surprising behaviour when many modules with dependencies were accumulated
   * [Mix] `Mix.Version` was renamed to `Version`
   * [Mix] `File.IteratorError` was renamed to `IO.StreamError`
+  * [Mix] `mix new` now defaults to the `--sup` option, use `--bare` to get the previous behaviour
 
 # v0.10.2 (2013-09-03)
 

@@ -3,12 +3,14 @@
          eval_quoted/4, format_error/1, eval_callbacks/5]).
 -include("elixir.hrl").
 
--define(docs_attr, '__docs_table').
 -define(acc_attr, '__acc_attributes').
+-define(docs_attr, '__docs_table').
+-define(lexical_attr, '__lexical_tracker').
 -define(persisted_attr, '__persisted_attributes').
+-define(overridable_attr, '__overridable').
 
 eval_quoted(Module, Quoted, RawBinding, Opts) ->
-  Binding = elixir_scope:binding_for_eval(RawBinding, Module),
+  Binding = orddict:store('_@MODULE', Module, RawBinding),
   Scope   = scope_for_eval(Module, Opts),
 
   elixir_def:reset_last(Module),
@@ -41,9 +43,14 @@ docs_table(Module) ->
 %% will be passed to the invoked function.
 
 translate(Meta, Ref, Block, S) ->
-  Line            = ?line(Meta),
-  MetaBlock       = elixir_utils:elixir_to_erl(Line, Block, S),
-  { MetaS, Vars } = elixir_scope:serialize_with_vars(Line, S),
+  Line = ?line(Meta),
+  LexS = case S#elixir_scope.function of
+    nil -> S;
+    _ -> S#elixir_scope{lexical_tracker=nil}
+  end,
+
+  MetaBlock       = elixir_utils:elixir_to_erl(Line, Block, LexS),
+  { MetaS, Vars } = elixir_scope:serialize_with_vars(Line, LexS),
 
   Args = [{integer, Line, Line}, Ref, MetaBlock, Vars, MetaS],
   ?wrap_call(Line, ?MODULE, compile, Args).
@@ -61,14 +68,14 @@ compile(Line, Module, Block, Vars, #elixir_scope{context_modules=FileModules} = 
   FileList = elixir_utils:characters_to_list(File),
 
   check_module_availability(Line, File, Module, C),
-  build(Line, File, Module),
+  build(Line, File, Module, S#elixir_scope.lexical_tracker),
 
   try
     Result = eval_form(Line, Module, Block, Vars, S),
     { Base, Export, Private, Def, Defmacro, Functions } = elixir_def:unwrap_stored_definitions(FileList, Module),
 
     { All, Forms0 } = functions_form(Line, File, Module, Base, Export, Def, Defmacro, Functions, C),
-    Forms1          = specs_form(Line, Module, Private, Defmacro, Forms0, C),
+    Forms1          = specs_form(Module, Private, Defmacro, Forms0, C),
     Forms2          = attributes_form(Line, File, Module, Forms1),
     Forms3          = typedocs_form(Module, Forms2),
 
@@ -80,9 +87,8 @@ compile(Line, Module, Block, Vars, #elixir_scope{context_modules=FileModules} = 
 
     AllFunctions = Def ++ [T || { T, defp, _, _, _ } <- Private],
     elixir_tracker:ensure_no_function_conflict(Line, File, Module, AllFunctions),
-    elixir_tracker:ensure_all_imports_used(Line, File, Module),
     elixir_tracker:warn_unused_local(File, Module, Private),
-    warn_invalid_docs(Line, File, Module, All),
+    warn_invalid_clauses(Line, File, Module, All),
     warn_unused_docs(Line, File, Module),
 
     Final = [
@@ -90,7 +96,7 @@ compile(Line, Module, Block, Vars, #elixir_scope{context_modules=FileModules} = 
       { attribute, Line, module, Module } | Forms3
     ],
 
-    Binary = load_form(Line, Final, S),
+    Binary = load_form(Line, Final, compile_opts(Module), S),
     { module, Module, Binary, Result }
   after
     elixir_tracker:cleanup(Module),
@@ -109,7 +115,7 @@ compile(Line, Module, Block, Vars, RawS) ->
 
 %% Hook that builds both attribute and functions and set up common hooks.
 
-build(Line, File, Module) ->
+build(Line, File, Module, Lexical) ->
   %% Table with meta information about the module.
   DataTable = data_table(Module),
 
@@ -119,7 +125,6 @@ build(Line, File, Module) ->
   end,
 
   ets:new(DataTable, [set, named_table, public]),
-  ets:insert(DataTable, { '__overridable', [] }),
   ets:insert(DataTable, { before_compile, [] }),
   ets:insert(DataTable, { after_compile, [] }),
 
@@ -129,9 +134,11 @@ build(Line, File, Module) ->
   end,
 
   Attributes = [behavior, behaviour, on_load, spec, type, export_type, opaque, callback, compile],
-  ets:insert(DataTable, { ?acc_attr, [before_compile,after_compile,on_definition|Attributes] }),
+  ets:insert(DataTable, { ?acc_attr, [before_compile, after_compile, on_definition|Attributes] }),
   ets:insert(DataTable, { ?persisted_attr, [vsn|Attributes] }),
   ets:insert(DataTable, { ?docs_attr, ets:new(DataTable, [ordered_set, public]) }),
+  ets:insert(DataTable, { ?lexical_attr, Lexical }),
+  ets:insert(DataTable, { ?overridable_attr, [] }),
 
   %% Setup other modules
   elixir_def:setup(Module),
@@ -213,7 +220,7 @@ typedocs_form(Module, Current) ->
 
 %% Specs
 
-specs_form(Line, Module, Private, Defmacro, Forms, C) ->
+specs_form(Module, Private, Defmacro, Forms, C) ->
   Defmacrop = [Tuple || { Tuple, defmacrop, _, _, _ } <- Private],
   case elixir_compiler:get_opt(internal, C) of
     true -> Forms;
@@ -225,16 +232,17 @@ specs_form(Line, Module, Private, Defmacro, Forms, C) ->
       'Elixir.Module':delete_attribute(Module, spec),
       'Elixir.Module':delete_attribute(Module, callback),
 
-      Temp = specs_attributes(Line, spec, Forms, Specs),
-      specs_attributes(Line, callback, Temp, Callbacks)
+      Temp = specs_attributes(spec, Forms, Specs),
+      specs_attributes(callback, Temp, Callbacks)
   end.
 
-specs_attributes(Line, Type, Forms, Specs) ->
+specs_attributes(Type, Forms, Specs) ->
   Keys = lists:foldl(fun({ Tuple, Value }, Acc) ->
-                       lists:keystore(Tuple, 1, Acc, { Tuple, Value } )
+                       lists:keystore(Tuple, 1, Acc, { Tuple, Value })
                      end, [], Specs),
   lists:foldl(fun({ Tuple, _ }, Acc) ->
     Values = [V || { K, V } <- Specs, K == Tuple],
+    { type, Line, _, _ } = hd(Values),
     [{ attribute, Line, Type, { Tuple, Values } }|Acc]
   end, Forms, Keys).
 
@@ -259,8 +267,14 @@ spec_for_macro(Else) -> Else.
 
 %% Loads the form into the code server.
 
-load_form(Line, Forms, #elixir_scope{file=File} = S) ->
-  elixir_compiler:module(Forms, File, fun(Module, Binary) ->
+compile_opts(Module) ->
+  case ets:lookup(data_table(Module), compile) of
+    [{compile,Opts}] when is_list(Opts) -> Opts;
+    [] -> []
+  end.
+
+load_form(Line, Forms, Opts, #elixir_scope{file=File} = S) ->
+  elixir_compiler:module(Forms, File, Opts, fun(Module, Binary) ->
     EvalS = scope_for_eval(Module, S),
     Env = elixir_scope:to_ex_env({ Line, EvalS }),
     eval_callbacks(Line, Module, after_compile, [Env, Binary], EvalS),
@@ -272,8 +286,9 @@ load_form(Line, Forms, #elixir_scope{file=File} = S) ->
         case get(elixir_compiler_pid) of
           undefined -> [];
           PID ->
-            PID ! { module_available, self(), File, Module, Binary },
-            receive { PID, ack } -> ok end
+            Ref = make_ref(),
+            PID ! { module_available, self(), Ref, File, Module, Binary },
+            receive { Ref, ack } -> ok end
         end;
       _ ->
         []
@@ -295,16 +310,16 @@ check_module_availability(Line, File, Module, Compiler) ->
       []
   end.
 
-warn_invalid_docs(_Line, _File, 'Elixir.Kernel', _All) -> ok;
-warn_invalid_docs(_Line, _File, 'Elixir.Kernel.SpecialForms', _All) -> ok;
-warn_invalid_docs(_Line, File, Module, All) ->
+warn_invalid_clauses(_Line, _File, 'Elixir.Kernel', _All) -> ok;
+warn_invalid_clauses(_Line, _File, 'Elixir.Kernel.SpecialForms', _All) -> ok;
+warn_invalid_clauses(_Line, File, Module, All) ->
   ets:foldl(fun
     ({ _, _, Kind, _, _ }, _) when Kind == type; Kind == opaque ->
       ok;
     ({ Tuple, Line, _, _, _ }, _) ->
       case lists:member(Tuple, All) of
         false ->
-          elixir_errors:handle_file_warning(File, { Line, ?MODULE, { invalid_doc, Tuple } });
+          elixir_errors:handle_file_warning(File, { Line, ?MODULE, { invalid_clause, Tuple } });
         true ->
           ok
       end
@@ -378,8 +393,7 @@ else_clause() ->
 % HELPERS
 
 eval_callbacks(Line, Module, Name, Args, RawS) ->
-  Binding   = elixir_scope:binding_for_eval([], Module),
-  S         = elixir_scope:vars_from_binding(RawS, Binding),
+  { Binding, S } = elixir_scope:load_binding([], RawS, Module),
   Callbacks = lists:reverse(ets:lookup_element(data_table(Module), Name, 2)),
   Meta      = [{line,Line},{require,false}],
 
@@ -398,25 +412,28 @@ eval_callbacks(Line, Module, Name, Args, RawS) ->
         catch
           Kind:Reason ->
             Info = { M, F, length(Args), [{ file, elixir_utils:characters_to_list(S#elixir_scope.file) }, { line, Line }] },
-            erlang:raise(Kind, Reason, munge_stacktrace(Info, erlang:get_stacktrace()))
+            erlang:raise(Kind, Reason, prune_stacktrace(Info, erlang:get_stacktrace()))
         end
     end
   end, Callbacks).
 
-%% We've reached the elixir_dispatch internals, skip it with the rest
-munge_stacktrace(Info, [{ elixir_module, _, _, _ }|_]) ->
+%% We've reached the elixir_module or erl_eval internals, skip it with the rest
+prune_stacktrace(Info, [{ erl_eval, _, _, _ }|_]) ->
   [Info];
 
-munge_stacktrace(Info, [H|T]) ->
-  [H|munge_stacktrace(Info, T)];
+prune_stacktrace(Info, [{ elixir_module, _, _, _ }|_]) ->
+  [Info];
 
-munge_stacktrace(Info, []) ->
+prune_stacktrace(Info, [H|T]) ->
+  [H|prune_stacktrace(Info, T)];
+
+prune_stacktrace(Info, []) ->
   [Info].
 
 % ERROR HANDLING
 
-format_error({ invalid_doc, { Name, Arity } }) ->
-  io_lib:format("docs provided for nonexistent function or macro ~ts/~B", [Name, Arity]);
+format_error({ invalid_clause, { Name, Arity } }) ->
+  io_lib:format("empty clause provided for nonexistent function or macro ~ts/~B", [Name, Arity]);
 
 format_error({ unused_doc, typedoc }) ->
   "@typedoc provided but no type follows it";

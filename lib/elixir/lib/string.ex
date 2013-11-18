@@ -1,3 +1,5 @@
+import Kernel, except: [length: 1]
+
 defmodule String do
   @moduledoc %S"""
   A String in Elixir is a UTF-8 encoded binary.
@@ -5,7 +7,7 @@ defmodule String do
   ## String and binary operations
 
   The functions in this module act according to the
-  Unicode Standard, version 6.2.0. For example,
+  Unicode Standard, version 6.3.0. For example,
   `capitalize/1`, `downcase/1`, `strip/1` are provided by this
   module.
 
@@ -16,7 +18,7 @@ defmodule String do
   * `Kernel.binary_part/3` - retrieves part of the binary
   * `Kernel.bit_size/1` and `Kernel.byte_size/1` - size related functions
   * `Kernel.is_bitstring/1` and `Kernel.is_binary/1` - type checking function
-  * Plus a number of conversion functions, like `Kernel.binary_to_atom/2`,
+  * Plus a number of conversion functions, like `Kernel.binary_to_atom/1`,
     `Kernel.binary_to_integer/2`, `Kernel.binary_to_term/1` and their inverses,
     like `Kernel.integer_to_binary/2`
 
@@ -30,9 +32,13 @@ defmodule String do
   For example, the character "é" is represented with two
   bytes:
 
-      iex> string = "é"
-      ...> byte_size(string)
+      iex> byte_size("é")
       2
+
+  However, this module returns the proper length:
+
+      iex> String.length("é")
+      1
 
   Furthermore, this module also presents the concept of
   graphemes, which are multiple characters that may be
@@ -43,6 +49,8 @@ defmodule String do
       iex> string = "\x{0065}\x{0301}"
       ...> byte_size(string)
       3
+      iex> String.length(string)
+      1
 
   Although the example above is made of two characters, it is
   perceived by users as one.
@@ -56,6 +64,11 @@ defmodule String do
   In general, the functions in this module rely on the Unicode
   Standard, but does not contain any of the locale specific
   behaviour.
+
+  More information about graphemes can be found in the [Unicode
+  Standard Annex #29](http://www.unicode.org/reports/tr29/).
+  This current Elixir version implements Extended Grapheme Cluster
+  algorithm.
 
   ## Integer codepoints
 
@@ -165,7 +178,7 @@ defmodule String do
   end
 
   @doc """
-  Splits a string on substrings at each Unicode whitespace
+  Divides a string into substrings at each Unicode whitespace
   occurrence with leading and trailing whitespace ignored.
 
   ## Examples
@@ -181,7 +194,7 @@ defmodule String do
   @spec split(t) :: [t]
   defdelegate split(binary), to: String.Unicode
 
-  @doc """
+  @doc %S"""
   Divides a string into substrings based on a pattern,
   returning a list of these substrings. The pattern can
   be a string, a list of strings or a regular expression.
@@ -194,6 +207,8 @@ defmodule String do
 
   ## Examples
 
+  Splitting with a string pattern:
+
       iex> String.split("a,b,c", ",")
       ["a", "b", "c"]
       iex> String.split("a,b,c", ",", global: false)
@@ -201,21 +216,30 @@ defmodule String do
       iex> String.split(" a b c ", " ", trim: true)
       ["a", "b", "c"]
 
+  A list of patterns:
+
       iex> String.split("1,2 3,4", [" ", ","])
       ["1", "2", "3", "4"]
+
+  A regular expression:
 
       iex> String.split("a,b,c", %r{,})
       ["a", "b", "c"]
       iex> String.split("a,b,c", %r{,}, global: false)
       ["a", "b,c"]
-      iex> String.split("a,b", %r{\\.})
-      ["a,b"]
-      iex> String.split("abc", %r{c})
-      ["ab", ""]
+      iex> String.split(" a b c ", %r{\s}, trim: true)
+      ["a", "b", "c"]
+
+  Splitting on empty patterns returns codepoints:
+
       iex> String.split("abc", %r{})
       ["a", "b", "c", ""]
-      iex> String.split("abc", %r{}, trim: true)
+      iex> String.split("abc", "")
+      ["a", "b", "c", ""]
+      iex> String.split("abc", "", trim: true)
       ["a", "b", "c"]
+      iex> String.split("abc", "", global: false)
+      ["a", "bc"]
 
   """
   @spec split(t, t | [t] | Regex.t) :: [t]
@@ -223,6 +247,8 @@ defmodule String do
   def split(binary, pattern, options // [])
 
   def split("", _pattern, _options), do: [""]
+
+  def split(binary, "", options), do: split(binary, %r"", options)
 
   def split(binary, pattern, options) when is_regex(pattern) do
     Regex.split(pattern, binary, options)
@@ -467,13 +493,13 @@ defmodule String do
   end
 
   defp do_justify(subject, len, padding, type) when is_integer(padding) do
-    subject_len = String.length(subject)
+    subject_len = length(subject)
 
     cond do
       subject_len >= len ->
         subject
       subject_len < len ->
-        fill = String.duplicate(<<padding :: utf8>>, len - subject_len)
+        fill = duplicate(<<padding :: utf8>>, len - subject_len)
 
         case type do
           :left  -> subject <> fill
@@ -555,11 +581,11 @@ defmodule String do
   """
   @spec reverse(t) :: t
   def reverse(string) do
-    do_reverse(String.Unicode.next_grapheme(string), [])
+    do_reverse(next_grapheme(string), [])
   end
 
   defp do_reverse({grapheme, rest}, acc) do
-    do_reverse(String.Unicode.next_grapheme(rest), [grapheme|acc])
+    do_reverse(next_grapheme(rest), [grapheme|acc])
   end
 
   defp do_reverse(:no_grapheme, acc), do: iolist_to_binary(acc)
@@ -616,6 +642,7 @@ defmodule String do
       { "j", "osé" }
 
   """
+  @compile { :inline, next_codepoint: 1 }
   @spec next_codepoint(t) :: {codepoint, t} | :no_codepoint
   defdelegate next_codepoint(string), to: String.Unicode
 
@@ -674,30 +701,10 @@ defmodule String do
   def valid_character?(<<_ :: utf8>> = codepoint), do: valid?(codepoint)
   def valid_character?(_), do: false
 
-  @doc %S"""
-  Checks whether `str` is a valid codepoint.
-
-  Note that the empty string is considered invalid, as are
-  strings containing multiple codepoints.
-
-  ## Examples
-
-      iex> String.valid_codepoint?("a")
-      true
-      iex> String.valid_codepoint?("ø")
-      true
-      iex> String.valid_codepoint?(<<0xffff :: 16>>)
-      false
-      iex> String.valid_codepoint?("asdf")
-      false
-
-  """
-  @spec valid_codepoint?(codepoint) :: boolean
-  def valid_codepoint?(<<_ :: utf8>>), do: true
-  def valid_codepoint?(_), do: false
-
   @doc """
-  Returns unicode graphemes in the string.
+  Returns unicode graphemes in the string as per Extended Grapheme
+  Cluster algorithm outlined in the [Unicode Standard Annex #29,
+  Unicode Text Segmentation](http://www.unicode.org/reports/tr29/).
 
   ## Examples
 
@@ -706,7 +713,7 @@ defmodule String do
 
   """
   @spec graphemes(t) :: [grapheme]
-  defdelegate graphemes(string), to: String.Unicode
+  defdelegate graphemes(string), to: String.Graphemes
 
   @doc """
   Returns the next grapheme in a String.
@@ -721,8 +728,9 @@ defmodule String do
       { "j", "osé" }
 
   """
+  @compile { :inline, next_grapheme: 1 }
   @spec next_grapheme(t) :: { grapheme, t } | :no_grapheme
-  defdelegate next_grapheme(string), to: String.Unicode
+  defdelegate next_grapheme(string), to: String.Graphemes
 
   @doc """
   Returns the first grapheme from an utf8 string,
@@ -814,7 +822,7 @@ defmodule String do
   end
 
   def at(string, position) when position < 0 do
-    real_pos = do_length(next_grapheme(string)) - abs(position)
+    real_pos = length(string) - abs(position)
     case real_pos >= 0 do
       true  -> do_at(next_grapheme(string), real_pos, 0)
       false -> nil
@@ -859,7 +867,7 @@ defmodule String do
   @spec slice(t, integer, integer) :: grapheme | nil
 
   def slice(string, start, 0) do
-    case abs(start) <= String.length(string) do
+    case abs(start) <= length(string) do
       true -> ""
       false -> nil
     end
@@ -870,10 +878,69 @@ defmodule String do
   end
 
   def slice(string, start, len) when start < 0 and len >= 0 do
-    real_start_pos = do_length(next_grapheme(string)) - abs(start)
+    real_start_pos = length(string) - abs(start)
     case real_start_pos >= 0 do
       true -> do_slice(next_grapheme(string), real_start_pos, real_start_pos + len - 1, 0, "")
       false -> nil
+    end
+  end
+
+  @doc """
+  Returns a substring from the offset given by the start of the
+  range to the offset given by the end of the range.
+
+  If the start of the range is not a valid offset for the given
+  string or if the range is in reverse order, returns `nil`.
+
+  ## Examples
+
+      iex> String.slice("elixir", 1..3)
+      "lix"
+      iex> String.slice("elixir", 1..10)
+      "lixir"
+      iex> String.slice("elixir", 10..3)
+      nil
+
+      iex> String.slice("elixir", -4..-1)
+      "ixir"
+      iex> String.slice("elixir", 2..-1)
+      "ixir"
+      iex> String.slice("elixir", -4..6)
+      "ixir"
+      iex> String.slice("elixir", -1..-4)
+      nil
+      iex> String.slice("elixir", -10..-7)
+      nil
+
+      iex> String.slice("a", 0..1500)
+      "a"
+      iex> String.slice("a", 1..1500)
+      ""
+      iex> String.slice("a", 2..1500)
+      nil
+
+  """
+  @spec slice(t, Range.t) :: t | nil
+
+  def slice(string, range)
+
+  def slice(string, first..last) when first >= 0 and last >= 0 do
+    do_slice(next_grapheme(string), first, last, 0, "")
+  end
+
+  def slice(string, first..last) do
+    total = length(string)
+
+    if first < 0 do
+      first = total + first
+    end
+
+    if last < 0 do
+      last = total + last
+    end
+
+    if first > 0 do
+      do_slice(next_grapheme(string), first, last, 0, "")
     end
   end
 
@@ -901,64 +968,6 @@ defmodule String do
     case acc do
       "" -> nil
       _ -> acc
-    end
-  end
-
-  @doc """
-  Converts a string to an integer. If successful, returns a
-  tuple of the form `{integer, remainder of string}`. If unsuccessful,
-  returns `:error`.
-
-  ## Examples
-
-      iex> String.to_integer("34")
-      {34,""}
-      iex> String.to_integer("34.5")
-      {34,".5"}
-      iex> String.to_integer("three")
-      :error
-
-  """
-  @spec to_integer(t) :: {integer, t} | :error
-
-  def to_integer(string) do
-    {result, remainder} = :string.to_integer(:binary.bin_to_list(string))
-    case result do
-      :error -> :error
-      _ -> {result, :binary.list_to_bin(remainder)}
-    end
-  end
-
-  @doc """
-  Converts a string to a float. If successful, returns a
-  tuple of the form `{float, remainder of string}`.
-  If unsuccessful, returns `:error`.
-
-  ## Examples
-
-      iex> String.to_float("34")
-      {34.0,""}
-      iex> String.to_float("34.25")
-      {34.25,""}
-      iex> String.to_float("56.5xyz")
-      {56.5,"xyz"}
-      iex> String.to_float("pi")
-      :error
-
-  """
-  @spec to_float(t) :: {integer, t} | :error
-
-  def to_float(string) do
-    charlist = :binary.bin_to_list(string)
-    {result, remainder} = :string.to_float(charlist)
-    case result do
-      :error ->
-        {int_result, int_remainder} = :string.to_integer(charlist)
-        case int_result do
-          :error -> :error
-          _ -> {:erlang.float(int_result), :binary.list_to_bin(int_remainder)}
-        end
-      _ -> {result, :binary.list_to_bin(remainder)}
     end
   end
 

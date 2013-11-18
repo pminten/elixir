@@ -65,7 +65,12 @@ defmodule Mix.Tasks.New do
 
     create_file "README.md",  readme_template(assigns)
     create_file ".gitignore", gitignore_text
-    create_file "mix.exs",    mixfile_template(assigns)
+
+    if in_umbrella? do
+      create_file "mix.exs", mixfile_apps_template(assigns)
+    else
+      create_file "mix.exs", mixfile_template(assigns)
+    end
 
     create_directory "lib"
 
@@ -83,7 +88,7 @@ defmodule Mix.Tasks.New do
 
     Mix.shell.info """
 
-    Your mix project was created with success.
+    Your mix project was created successfully.
     You can use mix to compile it, test it, and more:
 
         cd #{path}
@@ -105,7 +110,7 @@ defmodule Mix.Tasks.New do
 
     Mix.shell.info """
 
-    Your umbrella project was created with success.
+    Your umbrella project was created successfully.
     Inside your project, you will find an apps/ directory
     where you can create and host many apps:
 
@@ -125,6 +130,19 @@ defmodule Mix.Tasks.New do
     end
   end
 
+  defp in_umbrella? do
+    apps = Path.dirname(File.cwd!)
+
+    try do
+      Mix.Project.in_project(:umbrella_check, "../..", fn _ ->
+        path = Mix.project[:apps_path]
+        path && Path.expand(path) == apps
+      end)
+    catch
+      _, _ -> false
+    end
+  end
+
    embed_template :readme, """
    # <%= @mod %>
 
@@ -132,7 +150,7 @@ defmodule Mix.Tasks.New do
    """
 
    embed_text :gitignore, """
-   /ebin
+   /_build
    /deps
    erl_crash.dump
    *.ez
@@ -155,7 +173,42 @@ defmodule Mix.Tasks.New do
     end
 
     # Returns the list of dependencies in the format:
-    # { :foobar, "~> 0.1", git: "https://github.com/elixir-lang/foobar.git" }
+    # { :foobar, git: "https://github.com/elixir-lang/foobar.git", tag: "0.1" }
+    #
+    # To specify particular versions, regardless of the tag, do:
+    # { :barbat, "~> 0.1", github: "elixir-lang/barbat.git" }
+    defp deps do
+      []
+    end
+  end
+  """
+
+  embed_template :mixfile_apps, """
+  defmodule <%= @mod %>.Mixfile do
+    use Mix.Project
+
+    def project do
+      [ app: :<%= @app %>,
+        version: "0.0.1",
+        deps_path: "../../deps",
+        lockfile: "../../mix.lock",
+        elixir: "~> <%= System.version %>",
+        deps: deps ]
+    end
+
+    # Configuration for the OTP application
+    def application do
+      <%= @otp_app %>
+    end
+
+    # Returns the list of dependencies in the format:
+    # { :foobar, git: "https://github.com/elixir-lang/foobar.git", tag: "0.1" }
+    #
+    # To specify particular versions, regardless of the tag, do:
+    # { :barbat, "~> 0.1", github: "elixir-lang/barbat.git" }
+    #
+    # You can depend on another app in the same umbrella with:
+    # { :other, in_umbrella: true }
     defp deps do
       []
     end
@@ -172,7 +225,11 @@ defmodule Mix.Tasks.New do
     end
 
     # Returns the list of dependencies in the format:
-    # { :foobar, "~> 0.1", git: "https://github.com/elixir-lang/foobar.git" }
+    # { :foobar, git: "https://github.com/elixir-lang/foobar.git", tag: "0.1" }
+    #
+    # To specify particular versions, regardless of the tag, do:
+    # { :barbat, "~> 0.1", github: "elixir-lang/barbat.git" }
+    #
     # These dependencies are not accessible from child applications
     defp deps do
       []

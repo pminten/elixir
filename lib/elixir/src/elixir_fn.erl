@@ -48,6 +48,9 @@ capture(Meta, { { '.', _, [_, Fun] }, _, Args } = Expr, S) when is_atom(Fun), is
 capture(Meta, { { '.', _, [_] }, _, Args } = Expr, S) when is_list(Args) ->
   do_capture(Meta, Expr, S, false);
 
+capture(Meta, { '__block__', _, [Expr] }, S) ->
+  capture(Meta, Expr, S);
+
 capture(Meta, { '__block__', _, _ } = Expr, S) ->
   Message = "invalid args for &, block expressions are not allowed, got: ~ts",
   syntax_error(Meta, S#elixir_scope.file, Message, ['Elixir.Macro':to_string(Expr)]);
@@ -59,7 +62,7 @@ capture(Meta, { Left, Right }, S) ->
   capture(Meta, { '{}', Meta, [Left, Right] }, S);
 
 capture(Meta, List, S) when is_list(List) ->
-  capture(Meta, { '[]', Meta, List }, S);
+  do_capture(Meta, List, S, is_sequential_and_not_empty(List));
 
 capture(Meta, Arg, S) when is_integer(Arg) ->
   compile_error(Meta, S#elixir_scope.file, "unhandled &~B outside of a capture", [Arg]);

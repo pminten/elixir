@@ -67,8 +67,12 @@ defmodule RecordTest.Macros do
 
   # Ensure there is no conflict in a nested module
   # named record.
-  defrecord Record, [a: 1, b: 2]
+  defrecord Record, [a: 1, b: 2] do
+    alias Foo, as: Record, warn: false
+  end
 end
+
+defrecord RecordTest.FooTest, foo: nil, bar: nil
 
 defmodule RecordTest do
   use ExUnit.Case, async: true
@@ -116,6 +120,16 @@ defmodule RecordTest do
     assert RecordTest.FileInfo.__record__(:index, :atime) == record.__record__(:index, :atime)
   end
 
+  defmacrop compose_dynamic(opts) do
+    quote do
+      RecordTest.DynamicName[unquote_splicing(opts), { :b, "b" }]
+    end
+  end
+
+  test :compile_time_composition do
+    assert compose_dynamic(a: "a") == RecordTest.DynamicName[a: "a", b: "b"]
+  end
+
   test :to_keywords do
     record = RecordTest.DynamicName.new(a: "a", b: "b")
     assert record.to_keywords[:a] == "a"
@@ -160,6 +174,22 @@ defmodule RecordTest do
   test :extract_with_nested_records do
     namespace = Record.extract(:xmlElement, from_lib: "xmerl/include/xmerl.hrl")[:namespace]
     assert is_record(namespace, :xmlNamespace)
+  end
+
+  test :string_names do
+    a = RecordTest.FooTest.new([{"foo", 1}, {"bar", 1}])
+    assert a.foo == 1
+    assert a.bar == 1
+    a = a.update([{"foo", 2}, {"bar", 2}])
+    assert a.foo == 2
+    assert a.bar == 2
+  end
+
+  test :string_names_import do
+    record   = RecordTest.FileInfo.new([{"type", :regular}, {"access", 100}])
+    assert record.type == :regular
+    assert record.access == 100
+    assert record.update([{"access", 101}]).access == 101
   end
 
   defp empty_tuple, do: {}

@@ -3,7 +3,6 @@ defmodule Mix.Tasks.Loadpaths do
 
   @hidden true
   @shortdoc "Load the application and its dependencies paths"
-  @recursive true
 
   @moduledoc """
   Load the application and its dependencies paths.
@@ -39,7 +38,8 @@ defmodule Mix.Tasks.Loadpaths do
       end
     end
 
-    # Force recompile if we have a version mismatch
+    # Force recompile if we have a version mismatch.
+    # Skip it for umbrella apps since they have no build.
     old_vsn = Mix.Deps.Lock.elixir_vsn
     if old_vsn && old_vsn != System.version, do: Mix.Deps.Lock.touch
 

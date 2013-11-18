@@ -17,7 +17,6 @@
   module=nil,              %% the current module
   function=nil,            %% the current function
   vars=[],                 %% a dict of defined variables and their alias
-  list_vars=nil,           %% a list of vars passed down to Macro.Env
   backup_vars=nil,         %% a copy of vars to be used on ^var
   temp_vars=nil,           %% a set of all variables defined in a particular assign
   clause_vars=nil,         %% a dict of all variables defined in a particular clause
@@ -26,6 +25,8 @@
   local=nil,               %% the scope to evaluate local functions against
   context_modules=[],      %% modules defined in the current context
   macro_aliases=[],        %% keep aliases defined inside a macro
+  macro_counter=0,         %% macros expansions counter
+  lexical_tracker=nil,     %% holds the lexical tracker pid
   aliases,                 %% an orddict with aliases by new -> old names
   file,                    %% the current scope filename
   requires,                %% a set with modules required
@@ -36,7 +37,7 @@
 }).
 
 -record(elixir_quote, {
-  line=0,
+  line=nil,
   context=nil,
   vars_hygiene=true,
   aliases_hygiene=true,
@@ -44,6 +45,13 @@
   unquote=true,
   unquoted=false,
   escape=false
+}).
+
+-record(elixir_tokenizer, {
+  file,
+  terminators=[],
+  check_terminators=true,
+  existing_atoms_only=false
 }).
 
 %% Introspection

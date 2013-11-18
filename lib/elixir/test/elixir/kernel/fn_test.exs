@@ -51,13 +51,12 @@ defmodule Kernel.FnTest do
   end
 
   test "imported partial application" do
-    assert (&atom_to_binary(&1, :utf8)).(:a) == "a"
-    assert (&atom_to_binary(list_to_atom(&1), :utf8)).('a') == "a"
+    assert (&is_record(&1, Range)).(1..3)
   end
 
   test "remote partial application" do
-    assert (&:erlang.atom_to_binary(&1, :utf8)).(:a) == "a"
-    assert (&:erlang.atom_to_binary(list_to_atom(&1), :utf8)).('a') == "a"
+    assert (&:erlang.binary_part(&1, 1, 2)).("foo") == "oo"
+    assert (&:erlang.binary_part(atom_to_binary(&1), 1, 2)).(:foo) == "oo"
   end
 
   test "capture and partially apply tuples" do
@@ -81,6 +80,10 @@ defmodule Kernel.FnTest do
   test "capture and partially apply on call" do
     assert (&(&1.file)).(__ENV__) == __FILE__
     assert (&(&1.file(&2))).(__ENV__, "Hello").file == "Hello"
+  end
+
+  test "capture block like" do
+    assert (&(!is_atom(&1))).(:foo) == false
   end
 
   test "capture other" do

@@ -1,19 +1,19 @@
 defmodule Record do
   @moduledoc %S"""
-  Convenience functions for working with Records.
+  Functions for working with Records.
 
   A record is a tagged tuple which contains one or more elements
   where the first element is an atom. We can manually create a record
   by simply defining such a tuple:
 
-      iex> record = { User, "josé", 25 }
+      iex> record = { User, "José", 25 }
       iex> is_record(record, User)
       true
 
   However, manually constructing tuples can be quite error prone.
-  In case we need to add a new field to our User, it would require
+  If we need to add a new field to our User, it would require
   us to carefully change all places where the tuple is used.
-  Furthermore, as more and more items are added to the tuple, they
+  Furthermore, as more items are added to the tuple, they
   lose semantic value.
 
   This module solves these problems by allowing us to name each
@@ -38,7 +38,7 @@ defmodule Record do
   In the example above, `defrecordp` is going to generate a set of
   macros named `user` that allows us to create, update and match
   on a record. Our record is going to have two fields, a `name` with
-  default value of "José" and `age` of 25.
+  default value of "José" and `age` with default value 25.
 
   Let's see some examples:
 
@@ -75,7 +75,7 @@ defmodule Record do
   As the name says, `defrecordp` is useful when you don't want to
   expose the record definition. The `user` macro used above, for
   example, is only available inside the `User` module and nowhere else.
-  You can find more information in `Kernel.defrecordp/2` docs.
+  You can find more information in `Kernel.defrecordp/3` docs.
 
   ## defrecord
 
@@ -120,12 +120,12 @@ defmodule Record do
   ## Runtime access
 
   All the functionality discussed above happens at compilation time.
-  This means that both `user(user, age: 26)` and `User[user, age: 26]`
-  will be transformed into a simple tuple operation at compile time.
+  This means that both `user(age: 26)` and `User[age: 26]` are expanded
+  into a tuple at compile time.
 
   However, there are some situations where we want to set or update
-  fields dynamically. `defrecord` (and `defrecord` only) supports
-  it out of the box:
+  fields dynamically. `defrecord` (and not `defrecordp` ) supports
+  this behaviour out of the box:
 
       defrecord User, name: "José", age: 25
 
@@ -135,14 +135,23 @@ defmodule Record do
       user.update(age: 26)
       #=> User[name: "Hello", age: 26]
 
-  All the calls above happen at runtime. It gives Elixir
-  records flexibility at the cost of performance since
-  there is more work happening at runtime.
+  All the calls above happen at runtime. It gives Elixir records
+  flexibility at the cost of performance since there is more work
+  happening at runtime.
 
-  To sum up, `defrecordp` should be used when you don't want
-  to expose the record information while `defrecord` should be used
-  whenever you want to share a record within your code or with other
-  libraries or whenever you need to dynamically set or update fields.
+  The above calls (`new` and `update`) can accept both atom and string
+  keys for field names, however not both at the same time. This feature
+  allows to "sanitize" untrusted dictionaries and initialize/update
+  records without using `Kernel.binary_to_existing_atom/1`.
+
+  To sum up, `defrecordp` should be used when you don't want to expose
+  the record information while `defrecord` should be used whenever you
+  want to share a record within your code or with other libraries or
+  whenever you need to dynamically set or update fields.
+
+  The standard library contains excellent examples of both use cases,
+  with [`HashDict`](HashDict.html) being implemented with `defrecordp` 
+  and [`Range`](Range.html) with `defrecord`.
 
   You can learn more about records in the `Kernel.defrecord/3` docs. Now
   let's discuss the usefulness of combining records with protocols.
@@ -167,21 +176,29 @@ defmodule Record do
         end
       end
 
-  Now we can explicitly convert our WeekDate:
+  Now we can explicitly convert our `WeekDate`:
 
       to_string WeekDate[year: 2013, week: 26, week_day: 4]
       "2013-W26-4"
 
-  A protocol can be implemented for any record.
+  A protocol can be implemented for any record, whether
+  generated with `defrecordp` or `defrecord`.
   """
 
   @type t :: tuple
 
   @doc """
-  Extract record information from an Erlang file and
-  return the fields as a list of tuples.
+  Extract record information from an Erlang file. 
+  
+  Returns the fields as a list of tuples.
 
   ## Examples
+
+      > Record.extract(:file_info, from_lib: "kernel/include/file.hrl")
+      [size: :undefined, type: :undefined, access: :undefined, atime: :undefined,
+         mtime: :undefined, ctime: :undefined, mode: :undefined, links: :undefined,
+          major_device: :undefined, minor_device: :undefined, inode: :undefined,
+           uid: :undefined, gid: :undefined]
 
       defrecord FileInfo, Record.extract(:file_info, from_lib: "kernel/include/file.hrl")
 
@@ -191,8 +208,9 @@ defmodule Record do
   end
 
   @doc """
-  Imports a public record definition as a set of private macros,
-  as defined by `Kernel.defrecordp/2`. This is useful when one
+  Import a public record definition as a set of private macros.
+
+  Macros defined as in `Kernel.defrecordp/3`. This is useful when one
   desires to manipulate a record via a set of macros instead
   of the regular access syntax.
 
@@ -228,14 +246,14 @@ defmodule Record do
       unquoted_fields = unquote(fields)
 
       defmodule unquote(name) do
-        import Elixir.Record.DSL
+        import Record.DSL
 
         @record_fields []
         @record_types  []
 
-        Elixir.Record.deffunctions(unquoted_fields, __ENV__)
+        Record.deffunctions(unquoted_fields, __ENV__)
         value = unquote(block)
-        Elixir.Record.deftypes(@record_fields, @record_types, __ENV__)
+        Record.deftypes(@record_fields, @record_types, __ENV__)
         value
       end
     end
@@ -277,8 +295,9 @@ defmodule Record do
   end
 
   @doc """
-  Defines record functions skipping the module definition.
-  This is called directly by `defrecord`. It expects the record
+  Define record functions skipping the module definition.
+
+  This is called directly by `Kernel.defrecord/3`. It expects the record
   values, a set of options and the module environment.
 
   ## Examples
@@ -305,7 +324,7 @@ defmodule Record do
 
     contents = [quote(do: @record_fields unquote(escaped))|contents]
 
-    # Special case for bootstraping purposes
+    # Special case for bootstrapping purposes
     if env == Macro.Env do
       Module.eval_quoted(env, contents, [], [])
     else
@@ -314,7 +333,7 @@ defmodule Record do
   end
 
   @doc """
-  Defines types and specs for the record.
+  Define types and specs for the record.
   """
   def deftypes(values, types, env) do
     types  = types || []
@@ -336,8 +355,10 @@ defmodule Record do
   end
 
   @doc """
-  Defines macros for manipulating records. This is called
-  directly by `defrecordp`. It expects the macro name, the
+  Define macros for manipulating records. 
+  
+  This is called
+  directly by `Kernel.defrecordp/3`. It expects the macro name, the
   record values and the environment.
 
   ## Examples
@@ -411,7 +432,7 @@ defmodule Record do
   @doc false
   def access(atom, fields, keyword, caller) do
     unless is_keyword(keyword) do
-      raise ArgumentError, message: "expected contents inside brackets to be a Keyword"
+      raise ArgumentError, message: "expected contents inside brackets to be a keyword list, got: #{inspect keyword}"
     end
 
     in_match = caller.in_match?
@@ -624,9 +645,8 @@ defmodule Record do
     # an ordered dict of options (opts) and it will try to fetch
     # the given key from the ordered dict, falling back to the
     # default value if one does not exist.
-    selective = lc { k, v } inlist values do
-      quote do: Keyword.get(opts, unquote(k), unquote(v))
-    end
+    atom_selective   = lc { k, v } inlist values, do: initialize_lookup(k, v)
+    string_selective = lc { k, v } inlist values, do: initialize_lookup(atom_to_binary(k), v)
 
     quote do
       @doc false
@@ -634,7 +654,17 @@ defmodule Record do
 
       @doc false
       def new([]), do: { __MODULE__, unquote_splicing(defaults) }
-      def new(opts) when is_list(opts), do: { __MODULE__, unquote_splicing(selective) }
+      def new([{key, _}|_] = opts) when is_atom(key), do: { __MODULE__, unquote_splicing(atom_selective) }
+      def new([{key, _}|_] = opts) when is_binary(key), do: { __MODULE__, unquote_splicing(string_selective) }
+    end
+  end
+
+  defp initialize_lookup(k, v) do
+    quote do
+      case :lists.keyfind(unquote(k), 1, opts) do
+        false -> unquote(v)
+        {_, v} -> v
+      end
     end
   end
 
@@ -725,15 +755,14 @@ defmodule Record do
   # Define an updater method that receives a
   # keyword list and updates the record.
   defp updater(values) do
-    fields =
-      lc {key, _default} inlist values do
-        index = find_index(values, key, 1)
-        quote do
-          Keyword.get(keywords, unquote(key), elem(record, unquote(index)))
-        end
-      end
+    atom_fields =
+      lc {key, _default} inlist values, do: updater_lookup(key, key, values)
 
-    contents = quote do: { __MODULE__, unquote_splicing(fields) }
+    string_fields =
+      lc {key, _default} inlist values, do: updater_lookup(atom_to_binary(key), key, values)
+
+    atom_contents = quote do: { __MODULE__, unquote_splicing(atom_fields) }
+    string_contents = quote do: { __MODULE__, unquote_splicing(string_fields) }
 
     quote do
       @doc false
@@ -741,8 +770,22 @@ defmodule Record do
         record
       end
 
-      def update(keywords, record) do
-        unquote(contents)
+      def update([{key, _}|_] = keywords, record) when is_atom(key) do
+        unquote(atom_contents)
+      end
+      def update([{key, _}|_] = keywords, record) when is_binary(key) do
+        unquote(string_contents)
+      end
+    end
+  end
+
+  defp updater_lookup(k, key, values) do
+    v = find_index(values, key, 1)
+
+    quote do
+      case :lists.keyfind(unquote(k), 1, keywords) do
+        false -> elem(record, unquote(v))
+        {_, value} -> value
       end
     end
   end
@@ -765,6 +808,7 @@ defmodule Record do
   defp core_specs(values) do
     types   = lc { _, _, spec } inlist values, do: spec
     options = if values == [], do: [], else: [options_specs(values)]
+    values_specs = if values == [], do: [], else: values_specs(values)
 
     quote do
       unless Kernel.Typespec.defines_type?(__MODULE__, :t, 0) do
@@ -772,7 +816,7 @@ defmodule Record do
       end
 
       unless Kernel.Typespec.defines_type?(__MODULE__, :options, 0) do
-        @type options :: unquote(options)
+        @type options :: unquote(options) | [{String.t, unquote(values_specs)}]
       end
 
       @spec new :: t
@@ -789,6 +833,11 @@ defmodule Record do
     :lists.foldl fn { k, _, v }, acc ->
       { :|, [], [{ k, v }, acc] }
     end, { k, v }, t
+  end
+  defp values_specs([{ _, _, v }|t]) do
+    :lists.foldl fn { _, _, v }, acc ->
+      { :|, [], [v, acc] }
+    end, v, t
   end
 
   defp accessor_specs([{ :__exception__, _, _ }|t], 1, acc) do
@@ -867,6 +916,7 @@ defmodule Record.DSL do
 
   @doc """
   Defines the type for each field in the record.
+
   Expects a keyword list.
   """
   defmacro record_type(opts) when is_list(opts) do

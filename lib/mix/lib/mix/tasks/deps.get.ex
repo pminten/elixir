@@ -2,7 +2,6 @@ defmodule Mix.Tasks.Deps.Get do
   use Mix.Task
 
   @shortdoc "Get all out of date dependencies"
-  @recursive :both
 
   @moduledoc """
   Get all out of date dependencies, i.e. dependencies
@@ -16,18 +15,19 @@ defmodule Mix.Tasks.Deps.Get do
 
   """
 
-  import Mix.Deps, only: [all: 2, by_name: 1, format_dep: 1, check_lock: 2, out_of_date?: 1]
+  import Mix.Deps, only: [unloaded: 2, unloaded_by_name: 3, format_dep: 1,
+                          check_lock: 2, out_of_date?: 1]
 
   def run(args) do
     Mix.Project.get! # Require the project to be available
-
     { opts, rest, _ } = OptionParser.parse(args, switches: [no_compile: :boolean, quiet: :boolean])
 
-    if rest != [] do
-      { _, acc } = Enum.map_reduce by_name(rest), init, &deps_getter/2
-    else
-      acc = all(init, &deps_getter/2)
-    end
+    acc =
+      if rest != [] do
+        unloaded_by_name(rest, init, &deps_getter/2)
+      else
+        unloaded(init, &deps_getter/2)
+      end
 
     finalize_get(acc, opts)
   end
@@ -36,27 +36,17 @@ defmodule Mix.Tasks.Deps.Get do
     { [], Mix.Deps.Lock.read }
   end
 
-  defp finalize_get({ apps, lock }, opts) do
-    if apps == [] do
-      unless opts[:quiet], do: Mix.shell.info "All dependencies up to date"
-    else
-      Mix.Deps.Lock.write(lock)
+  defp finalize_get({ all_deps, { apps, lock } }, opts) do
+    Mix.Deps.finalize(all_deps, apps, lock, opts)
 
-      unless opts[:no_compile] do
-        case opts[:quiet] do
-          true ->
-            Mix.Task.run("deps.compile", ["--quiet"|apps])
-          _ ->
-            Mix.Task.run("deps.compile", apps)
-        end
-        unless opts[:no_deps_check], do: Mix.Task.run("deps.check", [])
-      end
+    if apps == [] && !opts[:quiet] do
+      Mix.shell.info "All dependencies up to date"
     end
   end
 
   defp deps_getter(dep, { acc, lock }) do
     shell = Mix.shell
-    Mix.Dep[app: app, scm: scm, opts: opts] = dep = check_lock(dep, lock)
+    Mix.Dep[app: app, scm: scm] = dep = check_lock(dep, lock)
 
     cond do
       # Path dependencies are specially handled because they cannot
@@ -68,8 +58,13 @@ defmodule Mix.Tasks.Deps.Get do
       out_of_date?(dep) ->
         shell.info "* Getting #{format_dep(dep)}"
 
-        old  = lock[app]
-        opts = Keyword.put(opts, :lock, old)
+        # If the lock is outdated, don't dare including it in the opts
+        opts =
+          if dep.status == :lockoutdated do
+            dep.opts
+          else
+            Keyword.put(dep.opts, :lock, lock[app])
+          end
 
         new =
           if scm.checked_out?(opts) do
@@ -79,9 +74,7 @@ defmodule Mix.Tasks.Deps.Get do
           end
 
         if new do
-          # Update the dependency returned so it is now
-          # available and nested dependencies can be fetched
-          { Mix.Deps.update(dep), { [app|acc], Keyword.put(lock, app, new) } }
+          { dep, { [app|acc], Keyword.put(lock, app, new) } }
         else
           { dep, { acc, lock } }
         end

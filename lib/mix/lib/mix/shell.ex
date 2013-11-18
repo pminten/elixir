@@ -28,9 +28,11 @@ defmodule Mix.Shell do
 
   @doc """
   Returns if we should output application name to shell.
+  Calling this function automatically toggles its value
+  to false.
   """
   def output_app? do
-    Mix.Server.call(:output_app?)
+    Mix.ProjectStack.output_app?
   end
 
   @doc """
@@ -60,15 +62,15 @@ defmodule Mix.Shell do
       { :unix, _ } ->
         command = command
           |> String.replace("\"", "\\\"")
-          |> :binary.bin_to_list # We need to send bytes, not chars
-        %c(sh -c "#{command}")
+          |> :binary.bin_to_list
+        'sh -c "' ++ command ++ '"'
 
       { :win32, osname } ->
-        command = to_char_list(command)
+        command = :binary.bin_to_list(command)
         case { System.get_env("COMSPEC"), osname } do
-          { nil, :windows } -> 'command.com /c #{command}'
-          { nil, _ }        -> 'cmd /c #{command}'
-          { cmd, _ }        -> '#{cmd} /c #{command}'
+          { nil, :windows } -> 'command.com /c ' ++ command
+          { nil, _ }        -> 'cmd /c ' ++ command
+          { cmd, _ }        -> '#{cmd} /c ' ++ command
         end
     end
   end

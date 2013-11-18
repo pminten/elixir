@@ -3,20 +3,22 @@ defmodule Mix.Tasks.Test do
     @moduledoc false
 
     def start(compile_path, opts) do
-      IO.write "Cover compiling modules ... "
+      Mix.shell.info "Cover compiling modules ... "
       :cover.start
       :cover.compile_beam_directory(compile_path |> to_char_list)
-      IO.puts "ok"
 
-      output = opts[:output]
+      if :application.get_env(:cover, :started) != { :ok, true } do
+        output = opts[:output]
 
-      System.at_exit fn(_) ->
-        IO.write "\nGenerating cover results ... "
-        File.mkdir_p!(output)
-        Enum.each :cover.modules, fn(mod) ->
-          :cover.analyse_to_file(mod, '#{output}/#{mod}.html', [:html])
+        System.at_exit fn(_) ->
+          Mix.shell.info "\nGenerating cover results ... "
+          File.mkdir_p!(output)
+          Enum.each :cover.modules, fn(mod) ->
+            :cover.analyse_to_file(mod, '#{output}/#{mod}.html', [:html])
+          end
         end
-        IO.puts "ok"
+
+        :application.set_env(:cover, :started, true)
       end
     end
   end
@@ -92,11 +94,12 @@ defmodule Mix.Tasks.Test do
     cover   = Keyword.merge(@cover, project[:test_coverage] || [])
 
     if opts[:cover] do
-      cover[:tool].start(project[:compile_path], cover)
+      cover[:tool].start(Mix.Project.compile_path(project), cover)
     end
 
     :application.load(:ex_unit)
-    ExUnit.configure(Dict.take(opts, [:trace, :max_cases, :color]))
+    opts = Dict.take(opts, [:trace, :max_cases, :color])
+    ExUnit.configure(opts)
 
     test_paths = project[:test_paths] || ["test"]
     Enum.each(test_paths, &require_test_helper(&1))

@@ -12,7 +12,14 @@
 -include("elixir.hrl").
 
 warn(Warning) ->
-  elixir_code_server:cast(register_warning),
+  CompilerPid = get(elixir_compiler_pid),
+
+  if
+    CompilerPid =/= undefined ->
+      elixir_code_server:cast({ register_warning, CompilerPid });
+    true -> false
+  end,
+
   io:put_chars(standard_error, Warning).
 
 %% Handle inspecting for exceptions modules
@@ -22,8 +29,8 @@ inspect(Atom) when is_atom(Atom) ->
 
 %% Raised during macros translation.
 
--spec syntax_error(non_neg_integer() | list(), file:filename(), binary() | string()) -> no_return().
--spec syntax_error(non_neg_integer() | list(), file:filename(), binary() | string(), list()) -> no_return().
+-spec syntax_error(non_neg_integer() | list(), file:filename_all(), binary() | string()) -> no_return().
+-spec syntax_error(non_neg_integer() | list(), file:filename_all(), binary() | string(), list()) -> no_return().
 
 syntax_error(Meta, File, Message) when is_list(Message) ->
   syntax_error(Meta, File, iolist_to_binary(Message));
@@ -47,7 +54,7 @@ compile_error(Meta, File, Format, Args)  ->
 
 %% Raised on tokenizing/parsing
 
--spec parse_error(non_neg_integer() | list(), file:filename(), iolist() | atom(), [] | iolist()) -> no_return().
+-spec parse_error(non_neg_integer() | list(), file:filename_all(), iolist() | atom(), [] | iolist()) -> no_return().
 
 parse_error(Meta, File, Error, []) ->
   Message = case Error of
@@ -75,7 +82,7 @@ parse_error(Meta, File, Error, Token) ->
 
 %% Raised during compilation
 
--spec form_error(non_neg_integer() | list(), file:filename(), module(), any()) -> no_return().
+-spec form_error(non_neg_integer() | list(), file:filename_all(), module(), any()) -> no_return().
 
 form_error(Meta, File, Module, Desc) ->
   Message = iolist_to_binary(format_error(Module, Desc)),
@@ -158,7 +165,7 @@ handle_file_warning(_, File, {Line,Module,Desc}) ->
 handle_file_warning(File, Desc) ->
   handle_file_warning(false, File, Desc).
 
--spec handle_file_error(file:filename(), {non_neg_integer(), module(), any()}) -> no_return().
+-spec handle_file_error(file:filename_all(), {non_neg_integer(), module(), any()}) -> no_return().
 
 handle_file_error(File, {Line,erl_lint,{unsafe_var,Var,{In,_Where}}}) ->
   Translated = case In of
@@ -167,6 +174,10 @@ handle_file_error(File, {Line,erl_lint,{unsafe_var,Var,{In,_Where}}}) ->
     _ -> In
   end,
   Message = io_lib:format("cannot define variable ~ts inside ~ts", [format_var(Var), Translated]),
+  raise(Line, File, 'Elixir.CompileError', iolist_to_binary(Message));
+
+handle_file_error(File, {Line,erl_lint,{spec_fun_undefined,{M,F,A}}}) ->
+  Message = io_lib:format("spec for undefined function ~ts.~ts/~B", [inspect(M), F, A]),
   raise(Line, File, 'Elixir.CompileError', iolist_to_binary(Message));
 
 handle_file_error(File, {Line,Module,Desc}) ->

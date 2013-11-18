@@ -3,7 +3,7 @@ defmodule Mix.SCM.Path do
   @moduledoc false
 
   def format(opts) do
-    [path: opts[:path]]
+    opts[:path]
   end
 
   def format_lock(_lock) do
@@ -30,8 +30,8 @@ defmodule Mix.SCM.Path do
     File.dir?(opts[:dest])
   end
 
-  def matches_lock?(_opts) do
-    true
+  def lock_status(_opts) do
+    :ok
   end
 
   def equal?(opts1, opts2) do
@@ -45,11 +45,5 @@ defmodule Mix.SCM.Path do
 
   def update(opts) do
     opts[:lock]
-  end
-
-  def clean(opts) do
-    path = Path.relative_to_cwd opts[:dest]
-    Mix.shell.info "  #{path} is a path dependency, it was not cleaned"
-    :noop
   end
 end

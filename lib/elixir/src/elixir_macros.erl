@@ -2,7 +2,7 @@
 %% but do not since they need to be implemented in Erlang.
 -module(elixir_macros).
 -export([translate/2]).
--import(elixir_translator, [translate_each/2, translate_args/2, translate_apply/7]).
+-import(elixir_translator, [translate_each/2]).
 -import(elixir_scope, [umergec/2, umergea/2]).
 -import(elixir_errors, [compile_error/3, syntax_error/3, syntax_error/4,
   assert_no_function_scope/3, assert_module_scope/3, assert_no_match_or_guard_scope/3]).
@@ -40,12 +40,7 @@ translate({ '!', Meta, [Expr] }, S) ->
   elixir_utils:convert_to_boolean(?line(Meta), TExpr, false, S#elixir_scope.context == guard, SE);
 
 translate({ in, Meta, [Left, Right] }, #elixir_scope{extra_guards=nil} = S) ->
-  { _, TExpr, TS } = translate_in(Meta, Left, Right, S),
-  { TExpr, TS };
-
-translate({ in, Meta, [Left, Right] }, #elixir_scope{extra_guards=Extra} = S) ->
-  { TVar, TExpr, TS } = translate_in(Meta, Left, Right, S),
-  { TVar, TS#elixir_scope{extra_guards=[TExpr|Extra]} };
+  translate_in(Meta, Left, Right, S);
 
 %% @
 
@@ -162,7 +157,7 @@ translate({defmodule, Meta, [Ref, KV]}, S) when is_list(KV) ->
       FullModule = expand_module(Ref, Module, S),
 
       RS = case elixir_aliases:nesting_alias(S#elixir_scope.module, FullModule) of
-        { New, Old } -> elixir_aliases:store(Meta, New, Old, S);
+        { New, Old } -> elixir_aliases:store(Meta, New, Old, [{warn,false}], S);
         false -> S
       end,
 
@@ -189,17 +184,6 @@ translate({Kind, Meta, [Call, Expr]}, S) when ?defs(Kind) ->
                    (not QC#elixir_quote.unquoted) andalso (not QE#elixir_quote.unquoted),
   { elixir_def:wrap_definition(Kind, Meta, TCall, TExpr, CheckClauses, SE), SE };
 
-%% Apply - Optimize apply by checking what doesn't need to be dispatched dynamically
-
-translate({ apply, Meta, [Left, Right, Args] }, S) when is_list(Args) ->
-  { TLeft,  SL } = translate_each(Left, S),
-  { TRight, SR } = translate_each(Right, umergec(S, SL)),
-  translate_apply(Meta, TLeft, TRight, Args, S, SL, SR);
-
-translate({ apply, Meta, Args }, S) ->
-  { TArgs, NS } = translate_args(Args, S),
-  { ?wrap_call(?line(Meta), erlang, apply, TArgs), NS };
-
 translate({ Name, Meta, Args }, S) ->
   syntax_error(Meta, S#elixir_scope.file,
                "invalid arguments for macro ~ts/~B", [Name, length(Args)]).
@@ -209,13 +193,7 @@ translate({ Name, Meta, Args }, S) ->
 translate_in(Meta, Left, Right, S) ->
   Line = ?line(Meta),
 
-  { TLeft, SL } = case Left of
-    { '_', _, Atom } when is_atom(Atom) ->
-      elixir_scope:build_erl_var(Line, S);
-    _ ->
-      translate_each(Left, S)
-  end,
-
+  { TLeft, SL }  = translate_each(Left, S),
   { TRight, SR } = translate_each(Right, SL),
 
   Cache = (S#elixir_scope.context == nil),
@@ -232,13 +210,13 @@ translate_in(Meta, Left, Right, S) ->
     { cons, _, _, _ } ->
       [H|T] = elixir_utils:cons_to_list(TRight),
       Expr = lists:foldr(fun(X, Acc) ->
-        { op, Line, 'orelse', { op, Line, '==', Var, X }, Acc }
-      end, { op, Line, '==', Var, H }, T),
+        { op, Line, 'orelse', { op, Line, '=:=', Var, X }, Acc }
+      end, { op, Line, '=:=', Var, H }, T),
       { Cache, Expr };
     { string, _, [H|T] } ->
       Expr = lists:foldl(fun(X, Acc) ->
-        { op, Line, 'orelse', { op, Line, '==', Var, { integer, Line, X } }, Acc }
-      end, { op, Line, '==', Var, { integer, Line, H } }, T),
+        { op, Line, 'orelse', { op, Line, '=:=', Var, { integer, Line, X } }, Acc }
+      end, { op, Line, '=:=', Var, { integer, Line, H } }, T),
       { Cache, Expr };
     { tuple, _, [{ atom, _, 'Elixir.Range' }, Start, End] } ->
       Expr = case { Start, End } of
@@ -267,8 +245,8 @@ translate_in(Meta, Left, Right, S) ->
   end,
 
   case TCache of
-    true  -> { Var, { block, Line, [ { match, Line, Var, TLeft }, TExpr ] }, SV };
-    false -> { Var, TExpr, SV }
+    true  -> { { block, Line, [ { match, Line, Var, TLeft }, TExpr ] }, SV };
+    false -> { TExpr, SV }
   end.
 
 increasing_compare(Line, Var, Start, End) ->
@@ -281,8 +259,18 @@ decreasing_compare(Line, Var, Start, End) ->
     { op, Line, '=<', Var, Start },
     { op, Line, '>=', Var, End } }.
 
-rewrite_case_clauses([{do,Meta1,[{in,_,[{'_',_,_},[false,nil]]}],False},{do,Meta2,[{'_',_,_}],True}]) ->
-  [{do,Meta1,[false],False},{do,Meta2,[true],True}];
+%% TODO: Once we have elixir_exp, we can move this
+%% clause to Elixir code and out of case.
+rewrite_case_clauses([
+    {do,Meta1,[{'when',_,[{V,M,C},{in,_,[{V,M,C},[false,nil]]}]}],False},
+    {do,Meta2,[{'_',_,UC}],True}] = Clauses)
+    when is_atom(V), is_list(M), is_atom(C), is_atom(UC) ->
+  case lists:keyfind('cond', 1, M) of
+    { 'cond', true } ->
+      [{do,Meta1,[false],False},{do,Meta2,[true],True}];
+    _ ->
+      Clauses
+  end;
 
 rewrite_case_clauses(Clauses) ->
   Clauses.
@@ -297,7 +285,8 @@ expand_module({ '__aliases__', _, [H] }, _Module, S) ->
 
 %% defmodule Hello.World
 expand_module({ '__aliases__', _, _ } = Alias, Module, S) ->
-  case elixir_aliases:expand(Alias, S#elixir_scope.aliases, S#elixir_scope.macro_aliases) of
+  case elixir_aliases:expand(Alias, S#elixir_scope.aliases, S#elixir_scope.macro_aliases,
+                             S#elixir_scope.lexical_tracker) of
     Atom when is_atom(Atom) ->
       Module;
     Aliases when is_list(Aliases) ->

@@ -30,7 +30,7 @@ defmodule Mix.RebarTest do
   test "parse rebar dependencies" do
     Mix.Project.push(RebarAsDep)
 
-    deps = Mix.Deps.all
+    deps = Mix.Deps.loaded
     assert Enum.find(deps, &match?(Mix.Dep[app: :rebar_dep], &1))
 
     assert Enum.find(deps, fn dep ->
@@ -45,25 +45,45 @@ defmodule Mix.RebarTest do
     Mix.Project.pop
   end
 
+  test "recurs over sub dirs" do
+    path = MixTest.Case.fixture_path("rebar_dep")
+
+    File.cd! path, fn ->
+     config = Mix.Rebar.load_config(path)
+
+      Mix.Rebar.recur(config, fn config ->
+        if config[:sub_dirs] == ['from_apps_another'] do
+          Process.put(:inside_apps_another, true)
+        end
+      end)
+    end
+
+    unless Process.get(:inside_apps_another) do
+      flunk "Expected inside_apps_another to return true"
+    end
+  end
+
   test "get and compile dependencies for rebar" do
     # Use rebar from project root
     System.put_env("MIX_HOME", MixTest.Case.elixir_root)
-
     Mix.Project.push(RebarAsDep)
 
     in_tmp "get and compile dependencies for rebar", fn ->
       Mix.Tasks.Deps.Get.run ["--no-compile"]
-      assert_received { :mix_shell, :info, ["* Getting git_rebar [git: \"../../test/fixtures/git_rebar\"]"] }
+      assert_received { :mix_shell, :info, ["* Getting git_rebar (../../test/fixtures/git_rebar)"] }
 
       Mix.Tasks.Deps.Compile.run []
       assert_received { :mix_shell, :info, ["* Compiling git_rebar"] }
       assert_received { :mix_shell, :info, ["* Compiling rebar_dep"] }
       assert :git_rebar.any_function == :ok
+      assert :rebar_dep.any_function == :ok
 
-      load_paths = Mix.Deps.all
+      load_paths = Mix.Deps.loaded
         |> Enum.map(&Mix.Deps.load_paths(&1))
         |> Enum.concat
 
+      assert File.exists?("_build/shared/lib/rebar_dep/ebin/rebar_dep.beam")
+      assert File.exists?("_build/shared/lib/git_rebar/ebin/git_rebar.beam")
       assert Enum.any?(load_paths, &String.ends_with?(&1, "git_rebar/ebin"))
       assert Enum.any?(load_paths, &String.ends_with?(&1, "rebar_dep/ebin"))
     end

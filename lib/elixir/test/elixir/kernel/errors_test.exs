@@ -25,6 +25,10 @@ defmodule Kernel.ErrorsTest do
     assert_compile_fail TokenMissingError,
       "nofile:3: missing terminator: } (for sigil %r{ starting at line 1)",
       '%r{foo\n\n'
+
+    assert_compile_fail TokenMissingError,
+      "nofile:3: missing terminator: ) (for sigil %r( starting at line 1)",
+      '%r(f(oo)\n\n'
   end
 
   test :dot_terminator do
@@ -91,8 +95,8 @@ defmodule Kernel.ErrorsTest do
     assert is_list []
     assert is_list do: 1
     assert is_list List.flatten [1]
-    assert is_atom binary_to_atom "foo", :utf8
-    assert is_atom(binary_to_atom "foo", :utf8)
+    assert is_atom is_record 1..3, Range
+    assert is_atom(is_record 1..3, Range)
   end
 
   test :syntax_error_with_no_token do
@@ -198,10 +202,14 @@ defmodule Kernel.ErrorsTest do
       'quote 1'
   end
 
-  test :invalid_parens do
+  test :invalid_calls do
     assert_compile_fail SyntaxError,
-      "nofile:1: unexpected parenthesis after foo(1)",
+      "nofile:1: invalid call foo(1)(2)",
       'foo(1)(2)'
+
+    assert_compile_fail SyntaxError,
+      "nofile:1: invalid remote call on 1",
+      '1.foo'
   end
 
   test :unhandled_stab do
@@ -241,7 +249,8 @@ defmodule Kernel.ErrorsTest do
 
   test :macro_local_conflict do
     assert_compile_fail CompileError,
-      "nofile:6: call to local macro &&/2 conflicts with imported Kernel.&&/2",
+      "nofile:6: call to local macro &&/2 conflicts with imported Kernel.&&/2, " <>
+      "please rename the local macro or remove the conflicting import",
       '''
       defmodule ErrorsTest do
         def hello, do: 1 || 2
@@ -306,9 +315,9 @@ defmodule Kernel.ErrorsTest do
   end
 
   test :unrequired_macro do
-    assert_compile_fail CompileError,
-      "nofile:2: tried to invoke macro Kernel.ErrorsTest.UnproperMacro.unproper/1 " <>
-      "but module was not required. Required: Integer, Kernel, Kernel.Typespec, Record",
+    assert_compile_fail SyntaxError,
+      "nofile:2: you must require Kernel.ErrorsTest.UnproperMacro before invoking " <>
+      "the macro Kernel.ErrorsTest.UnproperMacro.unproper/1 "
       '''
       defmodule ErrorsTest do
         Kernel.ErrorsTest.UnproperMacro.unproper([])
@@ -463,7 +472,7 @@ defmodule Kernel.ErrorsTest do
   end
 
   test :invalid_access_protocol_not_alias do
-    assert_raise ArgumentError, "the access protocol cannot be used inside match clauses (for example, on the left hand side of a match or in function signatures)", fn ->
+    assert_raise ArgumentError, "dynamic access cannot be invoked inside match and guard clauses", fn ->
       defmodule ErrorsTest do
         def sample(config[integer: 0]), do: true
       end
@@ -479,7 +488,7 @@ defmodule Kernel.ErrorsTest do
   end
 
   test :invalid_access_protocol_not_keywords do
-    assert_raise ArgumentError, "expected contents inside brackets to be a Keyword", fn ->
+    assert_raise ArgumentError, "expected contents inside brackets to be a keyword list, got: [0]", fn ->
       defmodule ErrorsTest do
         def sample(Kernel.ErrorsTest.Config[0]), do: true
       end
@@ -573,6 +582,34 @@ defmodule Kernel.ErrorsTest do
     assert_compile_fail CompileError,
       "nofile:1: cannot invoke remote function Hello.something_that_does_not_exist/0 inside guard",
       'case [] do; [] when Hello.something_that_does_not_exist == [] -> :ok; end'
+  end
+
+  test :typespec_errors do
+    assert_compile_fail CompileError,
+      "nofile:2: type foo() undefined",
+      '''
+      defmodule ErrorsTest do
+        @type omg :: foo
+      end
+      '''
+
+    assert_compile_fail CompileError,
+      "nofile:2: spec for undefined function ErrorsTest.omg/0",
+      '''
+      defmodule ErrorsTest do
+        @spec omg :: atom
+      end
+      '''
+  end
+
+  test :bad_unquoting do
+    assert_compile_fail SyntaxError,
+      "nofile: expected a valid quoted expression, got: {Range, 1, 3}",
+      '''
+      defmodule ErrorsTest do
+        def range(unquote(1..3)), do: :ok
+      end
+      '''
   end
 
   test :macros_error_stacktrace do

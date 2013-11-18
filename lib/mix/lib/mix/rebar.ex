@@ -1,10 +1,6 @@
 defmodule Mix.Rebar do
   @moduledoc false
 
-  # Make Mix.Rebar work like a project so we can push it into the stack.
-  @doc false
-  def project, do: []
-
   @doc """
   Returns the path supposed to host the local copy of rebar.
   """
@@ -70,24 +66,22 @@ defmodule Mix.Rebar do
   end
 
   @doc """
-  Runs `fun` inside the given directory and all specified `sub_dirs` in the
-  rebar config in the directory.
+  Runs `fun` for the given config and for each `sub_dirs` in the
+  given rebar config.
   """
-  def recur(dir, fun) do
-    config = load_config(dir)
+  def recur([h|_] = config, fun) when is_integer(h) do
+    recur(load_config(config), fun)
+  end
 
-    if sub_dirs = config[:sub_dirs] do
-      sub_dirs = sub_dirs
-       |> Enum.map(&Path.wildcard(&1))
-       |> Enum.concat
-       |> Enum.filter(&File.dir?(&1))
+  def recur(config, fun) do
+    subs = (config[:sub_dirs] || [])
+     |> Enum.map(&Path.wildcard(&1))
+     |> Enum.concat
+     |> Enum.filter(&File.dir?(&1))
+     |> Enum.map(&recur(&1, fun))
+     |> Enum.concat
 
-      Enum.map(sub_dirs, fn(dir) ->
-        recur(dir, fun)
-      end) |> Enum.concat
-    end
-
-    [File.cd!(dir, fn -> fun.(config) end)]
+    [fun.(config)|subs]
   end
 
   defp parse_dep({ app, req }, deps_dir) do
@@ -140,8 +134,8 @@ defmodule Mix.Rebar do
         config
       { :error, error } ->
         reason = :file.format_error(error)
-        Mix.Shell.error("Error evaluating rebar config script #{script_path}: #{reason}")
-        Mix.Shell.error("Any dependency defined in the script won't be available " <>
+        Mix.shell.error("Error evaluating rebar config script #{script_path}: #{reason}")
+        Mix.shell.error("Any dependency defined in the script won't be available " <>
           "unless you add them to your Mix project")
         config
     end

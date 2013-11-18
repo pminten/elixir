@@ -1,10 +1,35 @@
 defmodule Mix.Task do
   use Behaviour
-  alias :ordsets, as: Ordset
 
   @moduledoc """
   A simple module that provides conveniences for creating,
   loading and manipulating tasks.
+
+  A Mix task can be defined by simply using `Mix.Task`
+  in a module starting with `Mix.Tasks.` and defining
+  the `run/1` function:
+
+      defmodule Mix.Tasks.Hello do
+        use Mix.Task
+
+        def run(_) do
+          IO.puts "hello"
+        end
+      end
+
+  The `run/1` function will receive all arguments passed
+  to the command line.
+
+  ## Attributes
+
+  There are a couple attributes available in Mix tasks to
+  configure them in Mix:
+
+  * `@shortdoc` - shows a short description that appears
+    on `mix help`
+  * `@hidden` - do not show the task in `mix help`
+  * `@recursive` - run the task recursively in umbrella projects
+
   """
 
   @doc """
@@ -119,8 +144,9 @@ defmodule Mix.Task do
 
   * `Mix.NoTaskError` - raised if the task could not be found;
   * `Mix.InvalidTaskError` - raised if the task is not a valid `Mix.Task`
+
   """
-  def get(task) do
+  def get!(task) do
     case Mix.Utils.command_to_module(task, Mix.Tasks) do
       { :module, module } ->
         if is_task?(module) do
@@ -143,42 +169,28 @@ defmodule Mix.Task do
   again and simply aborts with `:noop`.
 
   It may raise an exception if the task was not found
-  or it is invalid. Check `get/1` for more information.
+  or it is invalid. Check `get!/1` for more information.
   """
   def run(task, args // []) do
     task = to_string(task)
-    app = Mix.project[:app]
 
-    if Mix.Server.call({ :has_task?, task, app }) do
-      :noop
-    else
-      module = get(task)
-      Mix.Server.cast({ :add_task, task, app })
+    if Mix.TasksServer.call({ :run_task, task, Mix.Project.get }) do
+      module = get!(task)
 
-      recursive = recursive(module)
-
-      if recursive && Mix.Server.call(:recursive_enabled?) do
-        Mix.Server.cast({ :recursive_enabled?, false })
-        res = if Mix.Project.umbrella? and recursive == :both do
-          [module.run(args)]
-        else
-          []
-        end
-        res = res ++ Mix.Project.recur(fn _ -> module.run(args) end)
-        Mix.Server.cast({ :recursive_enabled?, true })
-        res
-      else
+      recur module, fn proj ->
+        Mix.TasksServer.cast({ :put_task, task, proj })
         module.run(args)
       end
+    else
+      :noop
     end
   end
 
   @doc """
   Clears all invoked tasks, allowing them to be reinvoked.
-  Returns an ordset with all the tasks invoked thus far.
   """
   def clear do
-    Mix.Server.call(:clear_tasks)
+    Mix.TasksServer.call(:clear_tasks)
   end
 
   @doc """
@@ -186,10 +198,27 @@ defmodule Mix.Task do
   an umbrella project reenables a task it is reenabled for all sub projects.
   """
   def reenable(task) do
-    if Mix.Project.umbrella? do
-      Mix.Server.cast({ :delete_task, to_string(task) })
+    task   = to_string(task)
+    module = get!(task)
+
+    recur module, fn project ->
+      Mix.TasksServer.cast({ :delete_task, task, project })
+    end
+  end
+
+  defp recur(module, fun) do
+    umbrella? = Mix.Project.umbrella?
+    recursive = recursive(module)
+
+    if umbrella? && recursive && Mix.ProjectStack.enable_recursion do
+      config = [build_path: Mix.Project.build_path]
+      res = lc Mix.Dep[app: app, opts: opts] inlist Mix.Deps.Umbrella.loaded do
+        Mix.Project.in_project(app, opts[:path], config, fun)
+      end
+      Mix.ProjectStack.disable_recursion
+      res
     else
-      Mix.Server.cast({ :delete_task, to_string(task), Mix.project[:app] })
+      fun.(Mix.Project.get)
     end
   end
 
